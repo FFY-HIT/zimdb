@@ -1,0 +1,12 @@
+*.o
+*.so
+*.a
+*.pyc
+__pycache__/
+builder/zone_scan
+builder/join_scatter
+builder/out_*/
+libbogi23/build/
+*.bogi
+*.meta.json
+.DS_Store
