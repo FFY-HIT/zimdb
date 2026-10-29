@@ -10,3 +10,8 @@ libbogi23/build/
 *.bogi
 *.meta.json
 .DS_Store
+ops/data/
+*.zimdb
+*.zimdb.tmp
+_vendor_ops.py
+
