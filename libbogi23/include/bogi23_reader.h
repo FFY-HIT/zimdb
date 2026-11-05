@@ -16,41 +16,9 @@
 #define ZIR3_PROFILE_DNSSEC 0x50310002u
 
 
-#ifndef ZIR3_LEARNED_INDEX
-#define ZIR3_LEARNED_INDEX 1
-#endif
-
-/* Open-time FITing/RMI-style auxiliary index over owner restart keys.
- * Does not change on-disk BOGIP1 layout. Prediction is always verified by
- * exact key_compare within a local window (or full binary search fallback).
+/* Block location uses binary search over owner restart keys.
+ * (No open-time learned / FITing auxiliary index.)
  */
-typedef struct {
-    uint64_t x0;
-    double slope;
-    double intercept;
-    uint64_t start; /* inclusive block index */
-    uint64_t end;   /* exclusive */
-    uint32_t err;   /* max |pred-actual| over the segment, rounded up */
-} Zir3LearnedSeg;
-
-typedef struct {
-    uint8_t *key_bytes;
-    size_t key_bytes_len;
-    uint32_t *key_off;
-    uint16_t *key_len;
-    uint64_t *proj; /* HPT-CDF scaled to [0, 2^63) for monotone segment fit */
-    Zir3LearnedSeg *segs;
-    /* LITS-style Hash-enhanced Prefix Table: row = hash(prefix), col = next byte.
-     * Stores conditional CDF mass so GetCDF better handles skewed DNS prefixes
-     * than a uniform first-8-byte projection (Yang & Chen, PVLDB 2024). */
-    float *hpt_cdf;  /* ROWS*256 */
-    float *hpt_prob; /* ROWS*256 */
-    uint32_t hpt_rows;
-    uint64_t nkeys;
-    uint64_t nsegs;
-    int ready;
-    int use_hpt;
-} Zir3LearnedIndex;
 
 typedef enum {
     TK_HEADER,

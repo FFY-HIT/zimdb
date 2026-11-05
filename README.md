@@ -50,6 +50,9 @@ Optional env: `BOGI_WORKERS`, `BOGI_PARALLEL_SCAN=1`, `BOGI_ZONE_SCAN`, `BOGI_JO
 
 ## Shared reader library
 
+`libbogi23` / Zir memory-maps a BOGIP1 image and answers dig lookups via
+binary search over owner restart keys (no open-time learned accelerator).
+
 ```bash
 make -C libbogi23
 # → libbogi23/build/libbogi23.so
