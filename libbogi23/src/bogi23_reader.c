@@ -6,6 +6,7 @@
  * CoreIR/ResponseIR.
  */
 #include "bogi23_reader.h"
+#include "bogi23_binary_pool.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -287,7 +288,7 @@ int bogi23_open(Bogi23Reader *reader, const char *path) {
         little_u32(header + 16u) != 0x424f4704u ||
          (little_u32(header + 20u) != ZIR3_PROFILE_P1 &&
          little_u32(header + 20u) != ZIR3_PROFILE_DNSSEC) ||
-        little_u32(header + 24u) != 0u ||
+        (little_u32(header + 24u) & ~ZIR3_FLAG_BINARY_POOL) != 0u ||
         little_u16(header + 28u) != ZIR3_BLOCK_SIZE ||
         little_u16(header + 30u) != 0u ||
         little_u64(header + 120u) != 0u) {
@@ -295,6 +296,7 @@ int bogi23_open(Bogi23Reader *reader, const char *path) {
         return -1;
     }
     g_profile_id = little_u32(header + 20u);
+    reader->flags = little_u32(header + 24u);
     if (g_profile_id == ZIR3_PROFILE_DNSSEC) {
         g_type_order = TYPE_ORDER_DNSSEC;
         g_ntypes = ZIR3_NTYPES_DNSSEC;
@@ -476,16 +478,44 @@ static int read_pool_value(
         probes += 1u;
         reader->active_trace->pool_items_probed += 1u;
         if (ordinal == identifier) {
+            uint8_t *raw = NULL;
             char *text = NULL;
-            if (length > SIZE_MAX - 1u) return -1;
-            text = (char *)tracked_malloc(reader, (size_t)length + 1u);
-            if (text == NULL ||
-                read_at(reader, cursor, length, TK_POOL_PAYLOAD, text) != 0) {
-                tracked_free(reader, text);
+            if (length > SIZE_MAX) return -1;
+            raw = (uint8_t *)tracked_malloc(reader, (size_t)length ? (size_t)length : 1u);
+            if (raw == NULL ||
+                read_at(reader, cursor, length, TK_POOL_PAYLOAD, raw) != 0) {
+                tracked_free(reader, raw);
                 return -1;
             }
-            text[length] = '\0';
-            *text_out = text;
+            if ((reader->flags & ZIR3_FLAG_BINARY_POOL) != 0u) {
+                char *expanded = NULL;
+                size_t elen = 0u;
+                if (bogi23_binary_pool_expand(raw, (size_t)length, &expanded) != 0 ||
+                    expanded == NULL) {
+                    tracked_free(reader, raw);
+                    return -1;
+                }
+                tracked_free(reader, raw);
+                elen = strlen(expanded);
+                text = (char *)tracked_malloc(reader, elen + 1u);
+                if (text == NULL) {
+                    free(expanded);
+                    return -1;
+                }
+                memcpy(text, expanded, elen + 1u);
+                free(expanded);
+                *text_out = text;
+            } else {
+                char *plain = (char *)tracked_malloc(reader, (size_t)length + 1u);
+                if (plain == NULL) {
+                    tracked_free(reader, raw);
+                    return -1;
+                }
+                memcpy(plain, raw, (size_t)length);
+                plain[length] = '\0';
+                tracked_free(reader, raw);
+                *text_out = plain;
+            }
         }
         cursor = end;
     }

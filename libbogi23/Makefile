@@ -12,16 +12,19 @@ all: $(BUILD)/libbogi23.a $(BUILD)/libbogi23.so $(BUILD)/dump_zone
 $(BUILD):
 	mkdir -p $(BUILD)
 
-$(BUILD)/bogi23_reader.o: $(ROOT)src/bogi23_reader.c $(ROOT)include/bogi23_reader.h $(ROOT)include/bogi23_export.h $(ROOT)include/bogi23_dig.h | $(BUILD)
+$(BUILD)/bogi23_reader.o: $(ROOT)src/bogi23_reader.c $(ROOT)include/bogi23_reader.h $(ROOT)include/bogi23_export.h $(ROOT)include/bogi23_dig.h $(ROOT)include/bogi23_binary_pool.h | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/bogi23_binary_pool.o: $(ROOT)src/bogi23_binary_pool.c $(ROOT)include/bogi23_binary_pool.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD)/bogi_auth_answer.o: $(ROOT)src/bogi_auth_answer.c $(ROOT)include/bogi_auth_answer.h $(ROOT)include/bogi23_export.h $(ROOT)include/bogi23_reader.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/libbogi23.a: $(BUILD)/bogi23_reader.o $(BUILD)/bogi_auth_answer.o
+$(BUILD)/libbogi23.a: $(BUILD)/bogi23_reader.o $(BUILD)/bogi23_binary_pool.o $(BUILD)/bogi_auth_answer.o
 	$(AR) rcs $@ $^
 
-$(BUILD)/libbogi23.so: $(BUILD)/bogi23_reader.o $(BUILD)/bogi_auth_answer.o
+$(BUILD)/libbogi23.so: $(BUILD)/bogi23_reader.o $(BUILD)/bogi23_binary_pool.o $(BUILD)/bogi_auth_answer.o
 	$(CC) -shared -o $@ $^
 
 $(BUILD)/dump_zone: $(ROOT)smoke/dump_zone.c $(BUILD)/libbogi23.a

@@ -53,6 +53,18 @@ Optional env: `BOGI_WORKERS`, `BOGI_PARALLEL_SCAN=1`, `BOGI_ZONE_SCAN`, `BOGI_JO
 `libbogi23` / Zir memory-maps a BOGIP1 image and answers dig lookups via
 binary search over owner restart keys (no open-time learned accelerator).
 
+Optional **typed binary pool** (`flags` bit `0x4`) stores DNSSEC/presentation
+RDATA fields as wire-oriented binary (A/AAAA, SOA/MX integers, RRSIG
+times/signature, DS digest, DNSKEY key, NSEC3 next hash, etc.) and expands
+to presentation on dig. Encode with:
+
+```bash
+PYTHONPATH=. python3 builder/encode_binary_zone.py \
+  --zone path/to/zone.gz --origin example. --out example.binary.bogi
+```
+NSEC3 *owner* hash labels remain in κ(ASCII+1) so lexicographic order is preserved.
+
+
 ```bash
 make -C libbogi23
 # → libbogi23/build/libbogi23.so

@@ -14,6 +14,8 @@
 #define ZIR3_NTYPES_MAX 12u
 #define ZIR3_PROFILE_P1 0x50310001u
 #define ZIR3_PROFILE_DNSSEC 0x50310002u
+#define ZIR3_FLAG_BINARY_POOL 0x4u
+
 
 
 /* Block location uses binary search over owner restart keys.
@@ -81,6 +83,7 @@ typedef struct {
     uint64_t pool_restart_off;
     uint64_t pool_restart_count;
     uint64_t pool_off;
+    uint32_t flags;
     TraceEvent constructor_events[4];
     AccessTrace constructor_trace;
     AccessTrace *active_trace;
