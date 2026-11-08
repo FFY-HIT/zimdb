@@ -14,6 +14,7 @@ export BOGI_WORKERS="${BOGI_WORKERS:-$(nproc)}"
 export BOGI_PARALLEL_SCAN="${BOGI_PARALLEL_SCAN:-1}"
 export BOGI_JOIN_SCATTER="${BOGI_JOIN_SCATTER:-$HERE/join_scatter}"
 export BOGI_ZONE_SCAN="${BOGI_ZONE_SCAN:-$HERE/zone_scan}"
+# DNSSEC pool payloads default to typed binary (flags bit 0x4).
 
 /usr/bin/time -f "elapsed_wall=%e" python3 -u "$HERE/encode_com_dnssec_zimdb.py" \
   "$ZONE" "$OUT_DIR/image.bogi" "$OUT_DIR/work" "$ORIGIN" \

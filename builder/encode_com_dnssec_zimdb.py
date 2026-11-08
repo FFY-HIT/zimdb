@@ -14,6 +14,7 @@ so ReaderA binary search works.
 from __future__ import annotations
 
 import array
+import gzip
 import hashlib
 import heapq
 import json
@@ -26,6 +27,12 @@ import tempfile
 import time
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from pathlib import Path
+
+from binary_pool_codec import (  # noqa: E402
+    FLAG_BINARY_POOL,
+    TAG_UTF8,
+    pack_rdata,
+)
 
 TYPE_ORDER = (
     "A",
@@ -53,7 +60,7 @@ ENDIAN_MARKER = 0x4C45
 SCHEMA_ID = 0x424F4704
 # Must match experiments.compact_image_v23.format_v23.PROFILE_ID_DNSSEC
 PROFILE_ID = 0x50310002
-FLAGS = 0
+FLAGS = FLAG_BINARY_POOL  # BINARY POOL DEFAULT
 RESERVED0 = 0
 RESERVED1 = 0
 HEADER = struct.Struct("<8sHHHHIIIHHQQQQQQQQQQQQ")
@@ -949,20 +956,34 @@ class SpillWriter:
         self.paths: list[Path] = []
         self.buf = bytearray()
         self.count = 0
+        self.type_buf = bytearray()
+        self.type_paths: list[Path] = []
         # Write unsorted runs; parallel-sort before unique merge (faster on multi-core).
         self.defer_sort = defer_sort
         # Sort each run immediately after write (hides spill_sort inside Pass A workers).
         self.sort_on_flush = sort_on_flush
 
-    def add(self, rec: bytes) -> None:
+    def add(self, rec: bytes, type_idx: int | None = None) -> None:
         self.buf.extend(struct.pack("<I", len(rec)))
         self.buf.extend(rec)
+        if type_idx is not None and (FLAGS & FLAG_BINARY_POOL) != 0:
+            # hash[16] + type index — first occurrence wins at pool build
+            self.type_buf.extend(rec[:HASH_LEN])
+            self.type_buf.append(type_idx & 0xFF)
         self.count += 1
         if self.count >= SORT_CHUNK:
             self.flush()
 
     def flush(self) -> None:
+        if not self.buf and not self.type_buf:
+            return
         if not self.buf:
+            tpath = self.directory / (
+                f"{self.prefix}_type_{len(self.type_paths):05d}.bin"
+            )
+            tpath.write_bytes(bytes(self.type_buf))
+            self.type_paths.append(tpath)
+            self.type_buf.clear()
             return
         data = bytes(self.buf)
         if self.defer_sort or self.sort_on_flush:
@@ -987,6 +1008,11 @@ class SpillWriter:
         self.paths.append(path)
         self.buf.clear()
         self.count = 0
+        if self.type_buf:
+            tpath = self.directory / f"{self.prefix}_type_{len(self.type_paths):05d}.bin"
+            tpath.write_bytes(bytes(self.type_buf))
+            self.type_paths.append(tpath)
+            self.type_buf.clear()
         if self.sort_on_flush:
             _sort_spill_run_path(str(path))
 
@@ -1305,7 +1331,10 @@ def _scan_zone_range(payload: tuple) -> dict:
             for j, raw in enumerate(deduped):
                 h = _blake2b16(raw)
                 hash_blob.extend(h)
-                spill.add(pack_rec(h, rrset_count + local_rr, j, raw))
+                spill.add(
+                    pack_rec(h, rrset_count + local_rr, j, raw),
+                    TYPE_ORDER.index(_rrtype),
+                )
             local_rr += 1
             rdata_ref_count += len(deduped)
         rec = pack_owner_rec(cur_key, bytes(body), bytes(hash_blob))
@@ -1447,6 +1476,22 @@ def main() -> int:
     work = Path(sys.argv[3])
     origin = sys.argv[4] if len(sys.argv) > 4 else "com."
     work.mkdir(parents=True, exist_ok=True)
+    head = zone_path.read_bytes()[:2] if zone_path.is_file() else b""
+    if zone_path.suffix == ".gz" or head == bytes([0x1F, 0x8B]):
+        plain = work / (
+            zone_path.name[:-3]
+            if zone_path.name.endswith(".gz")
+            else (zone_path.name + ".zone")
+        )
+        if (not plain.is_file()) or plain.stat().st_mtime < zone_path.stat().st_mtime:
+            print(f"decompress {zone_path} -> {plain}", flush=True)
+            with gzip.open(zone_path, "rb") as src, plain.open("wb") as dst:
+                while True:
+                    chunk = src.read(8 << 20)
+                    if not chunk:
+                        break
+                    dst.write(chunk)
+        zone_path = plain
     wall0 = time.perf_counter()
     log_path = work / "encode.log"
 
@@ -1544,7 +1589,10 @@ def main() -> int:
             for j, raw in enumerate(deduped):
                 h = _blake2b16(raw)
                 hash_blob.extend(h)
-                spill.add(pack_rec(h, rrset_count + local_rr, j, raw))
+                spill.add(
+                    pack_rec(h, rrset_count + local_rr, j, raw),
+                    TYPE_ORDER.index(rrtype),
+                )
             local_rr += 1
             rdata_ref_count += len(deduped)
         rec = pack_owner_rec(key, bytes(body), bytes(hash_blob))
@@ -2099,7 +2147,8 @@ def main() -> int:
         "zone": str(zone_path),
         "output": str(out_path),
         "origin": origin,
-        "profile": "BOGI-v2.3 + TYPE_ORDER_DNSSEC + u16 mask",
+        "profile": "BOGI-v2.3 + TYPE_ORDER_DNSSEC + u16 mask + binary pool",
+        "flags": FLAGS,
         "pipeline_version": PIPELINE_VERSION,
         "owner_order": "bogi_key",
         "file_size": file_size,
@@ -2134,7 +2183,17 @@ def write_pool_and_hash_index(
     helper = _join_scatter_bin()
     hash_id_path = work / "hash_id_sorted.bin"
     ordinal = 0
-    if helper is not None:
+    type_by_hash: dict[bytes, int] = {}
+    if (FLAGS & FLAG_BINARY_POOL) != 0:
+        for tip in sorted(work.glob("**/*_type_*.bin")):
+            blob = tip.read_bytes()
+            for off in range(0, len(blob), HASH_LEN + 1):
+                if off + HASH_LEN + 1 > len(blob):
+                    break
+                h = blob[off : off + HASH_LEN]
+                type_by_hash.setdefault(h, blob[off + HASH_LEN])
+        log(f"pass C: binary pool type hints={len(type_by_hash):,}")
+    if helper is not None and (FLAGS & FLAG_BINARY_POOL) == 0:
         try:
             log(f"pass C: pool_build via {helper}")
             t0 = time.time()
@@ -2190,11 +2249,23 @@ def write_pool_and_hash_index(
                     raise RuntimeError("rdata length mismatch")
                 if ordinal % BLOCK_SIZE == 0:
                     pool_restarts.write(RESTART.pack(pool_off))
+                payload = raw
+                if (FLAGS & FLAG_BINARY_POOL) != 0:
+                    tidx = type_by_hash.get(rec[:HASH_LEN])
+                    if tidx is not None and 0 <= tidx < len(TYPE_ORDER):
+                        try:
+                            payload = pack_rdata(
+                                TYPE_ORDER[tidx], raw.decode("utf-8")
+                            )
+                        except Exception:
+                            payload = bytes([TAG_UTF8]) + raw
+                    else:
+                        payload = bytes([TAG_UTF8]) + raw
                 piece = (
                     encode_uleb128(rrset_ord)
                     + encode_uleb128(rdata_ord)
-                    + encode_uleb128(len(raw))
-                    + raw
+                    + encode_uleb128(len(payload))
+                    + payload
                 )
                 pool.write(piece)
                 pool_off += len(piece)

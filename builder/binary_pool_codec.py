@@ -206,7 +206,7 @@ def unpack_rdata(payload: bytes) -> str:
     if tag == TAG_A:
         return str(ipaddress.IPv4Address(b))
     if tag == TAG_AAAA:
-        return str(ipaddress.IPv6Address(b))
+        return ipaddress.IPv6Address(b).exploded
     if tag == TAG_SOA:
         off = 0
         mname, off = _get_name(b, off)
@@ -219,7 +219,7 @@ def unpack_rdata(payload: bytes) -> str:
         return f"{pref} {exch}"
     if tag == TAG_DS:
         keytag, alg, digt = struct.unpack_from("!HBB", b, 0)
-        return f"{keytag} {alg} {digt} {binascii.hexlify(b[4:]).decode()}"
+        return f"{keytag} {alg} {digt} {binascii.hexlify(b[4:]).decode().upper()}"
     if tag == TAG_DNSKEY:
         flags, proto, alg = struct.unpack_from("!HBB", b, 0)
         return f"{flags} {proto} {alg} {base64.b64encode(b[4:]).decode()}"
@@ -273,13 +273,13 @@ def unpack_rdata(payload: bytes) -> str:
         else:
             off += 1
             types, off = _get_name(b, off)
-        salt = "-" if not salt_b else binascii.hexlify(salt_b).decode()
+        salt = "-" if not salt_b else binascii.hexlify(salt_b).decode().upper()
         return f"{alg} {flags} {iters} {salt} {next_lab} {types}"
     if tag == TAG_NSEC3PARAM:
         alg, flags, iters = struct.unpack_from("!BBH", b, 0)
         sl = b[4]
         salt_b = b[5 : 5 + sl]
-        salt = "-" if not salt_b else binascii.hexlify(salt_b).decode()
+        salt = "-" if not salt_b else binascii.hexlify(salt_b).decode().upper()
         return f"{alg} {flags} {iters} {salt}"
     if tag == TAG_NS:
         return _get_name(b, 0)[0]

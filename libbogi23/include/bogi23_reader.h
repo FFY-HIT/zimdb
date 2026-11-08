@@ -5,6 +5,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "bogi23_huffman.h"
+
 #define ZIR3_BOGI_MAGIC "BOGIP1\0\0"
 #define ZIR3_HEADER_SIZE 128u
 #define ZIR3_BLOCK_SIZE 16u
@@ -15,6 +17,7 @@
 #define ZIR3_PROFILE_P1 0x50310001u
 #define ZIR3_PROFILE_DNSSEC 0x50310002u
 #define ZIR3_FLAG_BINARY_POOL 0x4u
+#define ZIR3_FLAG_HUFFMAN_SUFFIX 0x8u
 
 
 
@@ -84,6 +87,9 @@ typedef struct {
     uint64_t pool_restart_count;
     uint64_t pool_off;
     uint32_t flags;
+    uint64_t huffman_table_off;
+    uint64_t huffman_table_len;
+    Bogi23HuffTable huff;
     TraceEvent constructor_events[4];
     AccessTrace constructor_trace;
     AccessTrace *active_trace;

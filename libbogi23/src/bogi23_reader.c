@@ -7,6 +7,7 @@
  */
 #include "bogi23_reader.h"
 #include "bogi23_binary_pool.h"
+#include "bogi23_huffman.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -288,10 +289,10 @@ int bogi23_open(Bogi23Reader *reader, const char *path) {
         little_u32(header + 16u) != 0x424f4704u ||
          (little_u32(header + 20u) != ZIR3_PROFILE_P1 &&
          little_u32(header + 20u) != ZIR3_PROFILE_DNSSEC) ||
-        (little_u32(header + 24u) & ~ZIR3_FLAG_BINARY_POOL) != 0u ||
+        (little_u32(header + 24u) &
+         ~(ZIR3_FLAG_BINARY_POOL | ZIR3_FLAG_HUFFMAN_SUFFIX)) != 0u ||
         little_u16(header + 28u) != ZIR3_BLOCK_SIZE ||
-        little_u16(header + 30u) != 0u ||
-        little_u64(header + 120u) != 0u) {
+        little_u16(header + 30u) != 0u) {
         bogi23_close(reader);
         return -1;
     }
@@ -326,11 +327,40 @@ int bogi23_open(Bogi23Reader *reader, const char *path) {
     }
     reader->pool_restart_count =
         (reader->pool_entry_count + ZIR3_BLOCK_SIZE - 1u) / ZIR3_BLOCK_SIZE;
+    reader->huffman_table_len = little_u64(header + 120u);
+    reader->huffman_table_off = 0u;
+    (void)memset(&reader->huff, 0, sizeof(reader->huff));
     if (checked_add_u64(reader->origin_off, reader->origin_len, &end) != 0 ||
         end > reader->file_size ||
         checked_add_u64(reader->owner_stream_off, reader->owner_stream_len,
-                        &reader->pool_restart_off) != 0 ||
-        checked_mul_u64(reader->pool_restart_count, 8u, &product) != 0 ||
+                        &reader->pool_restart_off) != 0) {
+        bogi23_close(reader);
+        return -1;
+    }
+    if ((reader->flags & ZIR3_FLAG_HUFFMAN_SUFFIX) != 0u) {
+        uint64_t after_table = 0u;
+        if (reader->huffman_table_len == 0u ||
+            reader->huffman_table_len > 65536u ||
+            checked_add_u64(reader->pool_restart_off, reader->huffman_table_len,
+                            &after_table) != 0 ||
+            after_table > reader->file_size) {
+            bogi23_close(reader);
+            return -1;
+        }
+        reader->huffman_table_off = reader->pool_restart_off;
+        if (bogi23_huffman_load(
+                &reader->huff,
+                reader->map_base + (size_t)reader->huffman_table_off,
+                (size_t)reader->huffman_table_len) != 0) {
+            bogi23_close(reader);
+            return -1;
+        }
+        reader->pool_restart_off = after_table;
+    } else if (reader->huffman_table_len != 0u) {
+        bogi23_close(reader);
+        return -1;
+    }
+    if (checked_mul_u64(reader->pool_restart_count, 8u, &product) != 0 ||
         checked_add_u64(reader->pool_restart_off, product, &reader->pool_off) != 0 ||
         reader->pool_off > reader->file_size) {
         bogi23_close(reader);
@@ -829,6 +859,72 @@ failure:
     return -1;
 }
 
+
+/* Decode one owner key at *cursor (updates cursor to body uleb start). */
+static int read_owner_encoded_key(
+    Bogi23Reader *reader,
+    uint64_t *cursor,
+    uint64_t ordinal,
+    const uint8_t *previous,
+    size_t previous_length,
+    uint8_t *key,
+    size_t *key_length_out
+) {
+    if ((ordinal % ZIR3_BLOCK_SIZE) == 0u) {
+        uint64_t full_length = 0u;
+        if (read_uleb(reader, cursor, reader->pool_restart_off,
+                      TK_OWNER_META, &full_length) != 0 ||
+            full_length > ZIR3_MAX_KEY ||
+            read_at(reader, *cursor, full_length, TK_OWNER_KEY, key) != 0) {
+            return -1;
+        }
+        *cursor += full_length;
+        *key_length_out = (size_t)full_length;
+        return 0;
+    }
+    {
+        uint64_t common = 0u;
+        uint64_t suffix_length = 0u;
+        if (read_uleb(reader, cursor, reader->pool_restart_off,
+                      TK_OWNER_META, &common) != 0 ||
+            read_uleb(reader, cursor, reader->pool_restart_off,
+                      TK_OWNER_META, &suffix_length) != 0 ||
+            common > previous_length) {
+            return -1;
+        }
+        (void)memcpy(key, previous, (size_t)common);
+        if ((reader->flags & ZIR3_FLAG_HUFFMAN_SUFFIX) != 0u) {
+            uint8_t enc[512];
+            uint8_t plain[ZIR3_MAX_KEY];
+            int plain_len;
+            if (suffix_length > sizeof(enc) ||
+                read_at(reader, *cursor, suffix_length, TK_OWNER_KEY, enc) != 0) {
+                return -1;
+            }
+            *cursor += suffix_length;
+            plain_len = bogi23_huffman_decode_suffix(
+                &reader->huff, enc, (size_t)suffix_length, plain, ZIR3_MAX_KEY
+            );
+            if (plain_len < 0 ||
+                common + (uint64_t)plain_len > ZIR3_MAX_KEY) {
+                return -1;
+            }
+            (void)memcpy(key + (size_t)common, plain, (size_t)plain_len);
+            *key_length_out = (size_t)(common + (uint64_t)plain_len);
+            return 0;
+        }
+        if (suffix_length > ZIR3_MAX_KEY ||
+            common + suffix_length > ZIR3_MAX_KEY ||
+            read_at(reader, *cursor, suffix_length, TK_OWNER_KEY,
+                    key + (size_t)common) != 0) {
+            return -1;
+        }
+        *cursor += suffix_length;
+        *key_length_out = (size_t)(common + suffix_length);
+        return 0;
+    }
+}
+
 static int scan_owner(
     Bogi23Reader *reader, const uint8_t *target, size_t target_length,
     int decode_match, ScanResult *result
@@ -852,28 +948,9 @@ static int scan_owner(
         uint64_t body_length = 0u;
         uint64_t body_start = 0u;
         uint64_t after_body = 0u;
-        if (ordinal % ZIR3_BLOCK_SIZE == 0u) {
-            uint64_t full_length = 0u;
-            if (read_uleb(reader, &cursor, reader->pool_restart_off,
-                          TK_OWNER_META, &full_length) != 0 ||
-                full_length > ZIR3_MAX_KEY ||
-                read_at(reader, cursor, full_length, TK_OWNER_KEY, key) != 0) return -1;
-            cursor += full_length;
-            key_length = (size_t)full_length;
-        } else {
-            uint64_t common = 0u;
-            uint64_t suffix_length = 0u;
-            if (read_uleb(reader, &cursor, reader->pool_restart_off,
-                          TK_OWNER_META, &common) != 0 ||
-                read_uleb(reader, &cursor, reader->pool_restart_off,
-                          TK_OWNER_META, &suffix_length) != 0 ||
-                common > previous_length || suffix_length > ZIR3_MAX_KEY ||
-                common + suffix_length > ZIR3_MAX_KEY) return -1;
-            (void)memcpy(key, previous, (size_t)common);
-            if (read_at(reader, cursor, suffix_length, TK_OWNER_KEY,
-                        key + (size_t)common) != 0) return -1;
-            cursor += suffix_length;
-            key_length = (size_t)(common + suffix_length);
+        if (read_owner_encoded_key(reader, &cursor, ordinal, previous,
+                                   previous_length, key, &key_length) != 0) {
+            return -1;
         }
         body_start = cursor;
         if (read_uleb(reader, &body_start, reader->pool_restart_off,
@@ -1969,37 +2046,10 @@ int bogi23_foreach_owner(Bogi23Reader *reader, bogi23_owner_cb cb, void *arg) {
             uint64_t after_body = 0u;
             OwnerGroup group;
             int cb_rc;
-            if ((ordinal % ZIR3_BLOCK_SIZE) == 0u) {
-                uint64_t full_length = 0u;
-                if (read_uleb(reader, &cursor, reader->pool_restart_off,
-                              TK_OWNER_META, &full_length) != 0 ||
-                    full_length > ZIR3_MAX_KEY ||
-                    read_at(reader, cursor, full_length, TK_OWNER_KEY, key) != 0) {
-                    reader->active_trace = saved;
-                    return -1;
-                }
-                cursor += full_length;
-                key_length = (size_t)full_length;
-            } else {
-                uint64_t common = 0u;
-                uint64_t suffix_length = 0u;
-                if (read_uleb(reader, &cursor, reader->pool_restart_off,
-                              TK_OWNER_META, &common) != 0 ||
-                    read_uleb(reader, &cursor, reader->pool_restart_off,
-                              TK_OWNER_META, &suffix_length) != 0 ||
-                    common > previous_length || suffix_length > ZIR3_MAX_KEY ||
-                    common + suffix_length > ZIR3_MAX_KEY) {
-                    reader->active_trace = saved;
-                    return -1;
-                }
-                (void)memcpy(key, previous, (size_t)common);
-                if (read_at(reader, cursor, suffix_length, TK_OWNER_KEY,
-                            key + (size_t)common) != 0) {
-                    reader->active_trace = saved;
-                    return -1;
-                }
-                cursor += suffix_length;
-                key_length = (size_t)(common + suffix_length);
+            if (read_owner_encoded_key(reader, &cursor, ordinal, previous,
+                                       previous_length, key, &key_length) != 0) {
+                reader->active_trace = saved;
+                return -1;
             }
             body_start = cursor;
             if (read_uleb(reader, &body_start, reader->pool_restart_off,

@@ -89,7 +89,7 @@ static void b64_encode(const uint8_t *in, size_t inlen, char *out)
 
 static void hex_encode(const uint8_t *in, size_t inlen, char *out)
 {
-	static const char *h = "0123456789abcdef";
+	static const char *h = "0123456789ABCDEF";
 	size_t i;
 	for (i = 0; i < inlen; ++i) {
 		out[i * 2] = h[in[i] >> 4];
@@ -204,9 +204,20 @@ int bogi23_binary_pool_expand(const uint8_t *payload, size_t length, char **out)
 		return *out ? 0 : -1;
 	}
 	if (tag == TAG_AAAA) {
-		char ip[INET6_ADDRSTRLEN];
+		/* Match CZDS presentation: 8 groups, 4 lowercase hex digits each. */
+		char ip[48];
+		unsigned v0, v1, v2, v3, v4, v5, v6, v7;
 		if (n != 16) return -1;
-		if (!inet_ntop(AF_INET6, b, ip, sizeof ip)) return -1;
+		v0 = ((unsigned)b[0] << 8) | (unsigned)b[1];
+		v1 = ((unsigned)b[2] << 8) | (unsigned)b[3];
+		v2 = ((unsigned)b[4] << 8) | (unsigned)b[5];
+		v3 = ((unsigned)b[6] << 8) | (unsigned)b[7];
+		v4 = ((unsigned)b[8] << 8) | (unsigned)b[9];
+		v5 = ((unsigned)b[10] << 8) | (unsigned)b[11];
+		v6 = ((unsigned)b[12] << 8) | (unsigned)b[13];
+		v7 = ((unsigned)b[14] << 8) | (unsigned)b[15];
+		snprintf(ip, sizeof ip, "%04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x",
+			 v0, v1, v2, v3, v4, v5, v6, v7);
 		*out = strdup(ip);
 		return *out ? 0 : -1;
 	}
