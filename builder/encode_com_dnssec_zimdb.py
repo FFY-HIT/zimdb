@@ -979,7 +979,7 @@ class SpillWriter:
             return
         if not self.buf:
             tpath = self.directory / (
-                f"{self.prefix}_type_{len(self.type_paths):05d}.bin"
+                f"{self.prefix}.type_{len(self.type_paths):05d}.bin"
             )
             tpath.write_bytes(bytes(self.type_buf))
             self.type_paths.append(tpath)
@@ -1009,7 +1009,7 @@ class SpillWriter:
         self.buf.clear()
         self.count = 0
         if self.type_buf:
-            tpath = self.directory / f"{self.prefix}_type_{len(self.type_paths):05d}.bin"
+            tpath = self.directory / f"{self.prefix}.type_{len(self.type_paths):05d}.bin"
             tpath.write_bytes(bytes(self.type_buf))
             self.type_paths.append(tpath)
             self.type_buf.clear()
@@ -1233,7 +1233,7 @@ def _scan_zone_range_c(payload: tuple) -> dict:
         str(p) for p in owners_dir.glob(f"w{worker_id:02d}_own_*.bin")
     )
     spill_paths = sorted(
-        str(p) for p in spills_dir.glob(f"w{worker_id:02d}_rdata_*.bin")
+        str(p) for p in spills_dir.glob(f"w{worker_id:02d}_rdata_[0-9][0-9][0-9][0-9][0-9].bin")
     )
     return {
         "owner_paths": owner_paths,
@@ -2185,7 +2185,7 @@ def write_pool_and_hash_index(
     ordinal = 0
     type_by_hash: dict[bytes, int] = {}
     if (FLAGS & FLAG_BINARY_POOL) != 0:
-        for tip in sorted(work.glob("**/*_type_*.bin")):
+        for tip in sorted(list(work.glob("**/*.type_*.bin")) + list(work.glob("**/*_type_*.bin"))):
             blob = tip.read_bytes()
             for off in range(0, len(blob), HASH_LEN + 1):
                 if off + HASH_LEN + 1 > len(blob):

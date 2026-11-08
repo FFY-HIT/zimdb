@@ -195,9 +195,11 @@ typedef struct {
   char dir[512];
   char prefix[64];
   Buf buf;
+  Buf type_buf;
   size_t count;
   size_t sort_chunk;
   size_t nfiles;
+  size_t ntype_files;
   char paths[512][512];
   size_t npaths;
 } SpillW;
@@ -207,6 +209,7 @@ static void spill_init(SpillW *s, const char *dir, const char *prefix, size_t ch
   snprintf(s->dir, sizeof(s->dir), "%s", dir);
   snprintf(s->prefix, sizeof(s->prefix), "%s", prefix);
   buf_init(&s->buf);
+  buf_init(&s->type_buf);
   s->sort_chunk = chunk;
 }
 
@@ -225,8 +228,26 @@ static int cmp_spill(const void *a, const void *b) {
   return (x->raw_len > y->raw_len) - (x->raw_len < y->raw_len);
 }
 
+static void spill_flush_types(SpillW *s) {
+  if (!s->type_buf.len) return;
+  char tpath[512];
+  snprintf(tpath, sizeof(tpath), "%s/%s.type_%05zu.bin", s->dir, s->prefix,
+           s->ntype_files);
+  FILE *tout = fopen(tpath, "wb");
+  if (!tout) die(tpath);
+  if (fwrite(s->type_buf.data, 1, s->type_buf.len, tout) != s->type_buf.len)
+    die("type spill write");
+  fclose(tout);
+  s->ntype_files++;
+  buf_clear(&s->type_buf);
+}
+
 static void spill_flush(SpillW *s) {
-  if (!s->buf.len) return;
+  if (!s->buf.len && !s->type_buf.len) return;
+  if (!s->buf.len) {
+    spill_flush_types(s);
+    return;
+  }
   char path[512];
   snprintf(path, sizeof(path), "%s/%s_%05zu.bin", s->dir, s->prefix, s->nfiles);
   size_t ncap = s->count + 8;
@@ -264,10 +285,11 @@ static void spill_flush(SpillW *s) {
   s->nfiles++;
   buf_clear(&s->buf);
   s->count = 0;
+  spill_flush_types(s);
 }
 
 static void spill_add(SpillW *s, const uint8_t *h, uint32_t rrset_ord, uint32_t rdata_ord,
-                      const uint8_t *raw, uint32_t raw_len) {
+                      const uint8_t *raw, uint32_t raw_len, int type_idx) {
   uint32_t ln = HASH_LEN + 12 + raw_len;
   uint8_t hdr[4 + HASH_LEN + 12];
   memcpy(hdr, &ln, 4);
@@ -277,6 +299,12 @@ static void spill_add(SpillW *s, const uint8_t *h, uint32_t rrset_ord, uint32_t 
   memcpy(hdr + 4 + HASH_LEN + 8, &raw_len, 4);
   buf_append(&s->buf, hdr, sizeof(hdr));
   buf_append(&s->buf, raw, raw_len);
+  if (type_idx >= 0 && type_idx < NTYPES) {
+    uint8_t tip[HASH_LEN + 1];
+    memcpy(tip, h, HASH_LEN);
+    tip[HASH_LEN] = (uint8_t)type_idx;
+    buf_append(&s->type_buf, tip, sizeof(tip));
+  }
   s->count++;
   if (s->count >= s->sort_chunk) spill_flush(s);
 }
@@ -357,7 +385,7 @@ static void flush_owner(OwnerState *st, OwnerW *ow, SpillW *sw, uint32_t *rrset_
       memcpy(hash_blob + hblen, h, HASH_LEN);
       hblen += HASH_LEN;
       spill_add(sw, h, *rrset_count + local_rr, (uint32_t)j, tb->items[j].ptr,
-                tb->items[j].len);
+                tb->items[j].len, t);
     }
     local_rr++;
     *rdata_ref_count += tb->n;
