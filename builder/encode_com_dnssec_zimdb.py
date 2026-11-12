@@ -1170,7 +1170,8 @@ def _align_next_line(fh, pos: int) -> int:
         fh.seek(0)
         return 0
     fh.seek(pos - 1)
-    fh.read(1)  # if prior byte isn't newline, skip to EOL
+    if fh.read(1) == b"\n":
+        return fh.tell()
     while True:
         ch = fh.read(1)
         if not ch or ch == b"\n":
@@ -1351,10 +1352,10 @@ def _scan_zone_range(payload: tuple) -> dict:
     with zone_path.open("rb", buffering=16 << 20) as fh:
         _align_next_line(fh, start)
         while True:
+            line_start = fh.tell()
             raw_line = fh.readline()
             if not raw_line:
                 break
-            at = fh.tell()
             lines += 1
             if raw_line.endswith(b"\n"):
                 raw_line = raw_line[:-1]
@@ -1366,10 +1367,10 @@ def _scan_zone_range(payload: tuple) -> dict:
                 skipped += 1
                 continue
             new_owner = cur_owner is not None and owner != cur_owner
-            # Past chunk end: finish current owner, do not start a new one
-            if at > end and new_owner:
+            # Assign crossing lines by their first byte; finish current owner.
+            if line_start >= end and new_owner:
                 break
-            if at > end and cur_owner is None:
+            if line_start >= end and cur_owner is None:
                 break
             if new_owner:
                 flush_owner()

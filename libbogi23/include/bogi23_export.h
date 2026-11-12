@@ -19,7 +19,7 @@ typedef struct Bogi23RRset {
 } Bogi23RRset;
 
 typedef struct Bogi23OwnerGroup {
-	Bogi23RRset sets[ZIR3_NTYPES];
+	Bogi23RRset sets[ZIR3_NTYPES_MAX]; /* common correctness: internal DNSSEC capacity is12 */
 	size_t count;
 	char *owner;
 } Bogi23OwnerGroup;

@@ -604,7 +604,6 @@ int main(int argc, char **argv) {
     size_t linelen = pos - line_start;
     if (pos < zsize) pos++; /* skip \n */
     lines++;
-    size_t at = pos; /* file position after line */
 
     if (linelen >= sizeof(linebuf)) {
       skipped++;
@@ -632,8 +631,10 @@ int main(int argc, char **argv) {
     }
 
     int new_own = had && strcmp(ost.owner, new_owner) != 0;
-    if (at > end && new_own) break;
-    if (at > end && !had) break;
+    /* A crossing line belongs to the range containing its first byte.
+     * Finish the current owner beyond end; A2 coalesces overlap. */
+    if (line_start >= end && new_own) break;
+    if (line_start >= end && !had) break;
 
     if (new_own) {
       flush_owner(&ost, &ow, &sw, &rrset_count, &rdata_ref_count, &owner_count);

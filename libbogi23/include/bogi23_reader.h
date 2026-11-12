@@ -70,6 +70,7 @@ typedef struct {
 typedef struct {
     int fd;
     const uint8_t *map_base;
+    void *key_codec; /* v2 per-owner physical codec state; matching ABI rebuild required */
     size_t map_size;
     char origin[255];
     uint64_t file_size;

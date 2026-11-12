@@ -6,6 +6,8 @@
  * CoreIR/ResponseIR.
  */
 #include "bogi23_reader.h"
+#include "bogi23_key_codec.h"
+#include "bogi23_export.h"
 #include "bogi23_binary_pool.h"
 #include "bogi23_huffman.h"
 
@@ -208,6 +210,10 @@ static int read_at(
     void *destination
 ) {
     uint64_t end = 0u;
+    if (reader->key_codec != NULL) {
+        if (trace_record(reader, offset, length, kind) != 0) return -1;
+        return bogi23_key_read(reader, offset, length, destination);
+    }
     if (checked_add_u64(offset, length, &end) != 0 || end > reader->map_size) {
         return -1;
     }
@@ -277,6 +283,10 @@ int bogi23_open(Bogi23Reader *reader, const char *path) {
         return -1;
     }
     reader->map_base = (const uint8_t *)mapping;
+    if (bogi23_key_attach(reader) < 0) {
+        bogi23_close(reader);
+        return -1;
+    }
     if (read_at(reader, 0u, ZIR3_HEADER_SIZE, TK_HEADER, header) != 0) {
         bogi23_close(reader);
         return -1;
@@ -318,7 +328,7 @@ int bogi23_open(Bogi23Reader *reader, const char *path) {
     reader->rrset_count = little_u64(header + 96u);
     reader->rdata_count = little_u64(header + 104u);
     reader->pool_entry_count = little_u64(header + 112u);
-    if (reader->file_size != reader->map_size ||
+    if (reader->file_size != bogi23_key_logical_size(reader) ||
         reader->origin_len == 0u || reader->origin_len > 254u ||
         reader->owner_count == 0u || reader->owner_restart_count == 0u ||
         reader->pool_entry_count == 0u) {
@@ -386,6 +396,7 @@ static void trace_release(Bogi23Reader *reader, AccessTrace *trace) {
 }
 
 void bogi23_close(Bogi23Reader *reader) {
+    bogi23_key_close(reader);
     if (reader->map_base != NULL && reader->map_size > 0u) {
         (void)munmap((void *)(uintptr_t)reader->map_base, reader->map_size);
     }
@@ -567,10 +578,15 @@ typedef struct {
 } RRset;
 
 typedef struct {
-    RRset sets[ZIR3_NTYPES];
+    RRset sets[ZIR3_NTYPES_MAX]; /* common correctness: admitted DNSSEC capacity is12 */
     size_t count;
     char *owner;
 } OwnerGroup;
+
+_Static_assert(sizeof(Bogi23OwnerGroup) == sizeof(OwnerGroup),
+               "public OwnerGroup capacity/layout must match internal DNSSEC layout");
+_Static_assert(sizeof(Bogi23RRset) == sizeof(RRset),
+               "public RRset layout must match internal layout");
 
 typedef struct {
     uint8_t key[ZIR3_MAX_KEY];
@@ -756,6 +772,8 @@ static int restart_key(
     uint64_t cursor = 0u;
     uint64_t length = 0u;
     uint64_t end = 0u;
+    if (reader->key_codec != NULL)
+        return bogi23_key_first_key(reader, number, key, key_length);
     if (restart_position(reader, number, &cursor) != 0 ||
         read_uleb(reader, &cursor, reader->pool_restart_off, TK_OWNER_META,
                   &length) != 0 ||
@@ -2351,4 +2369,11 @@ int bogi23_dig_write_zonefile(Bogi23Reader *reader, const char *path)
     if (fclose(fp) != 0)
         return -1;
     return 0;
+}
+
+/* Reconstruction helper; returns the original logical BOGIP1 image bytes.
+ * The normal trace records logical accesses, not wrapper physical I/O. */
+int bogi23_read_logical(Bogi23Reader *reader, uint64_t offset,
+                        uint64_t length, void *out) {
+    return read_at(reader, offset, length, TK_HEADER, out);
 }
