@@ -6,8 +6,9 @@ replace that pipeline with a whole-zone Python object graph.
 
 The starting repository revision is
 `9635294a7a1bb3ff464c721cbd919cdb4a67d64b`. This branch also includes shared
-correctness fixes for parallel input-range boundaries and the matching reader
-export/TTL path. Those fixes apply equally to unwrapped and codec variants;
+correctness fixes for parallel input-range boundaries and matching public/internal
+reader RRset capacity (7 to12). The original RRSIG storage/export TTL algorithm
+was not changed. Those fixes apply equally to unwrapped and codec variants;
 they are separate from codec effects. Inspect the branch diff when reproducing
 an experiment rather than identifying the branch solely by its base revision.
 
@@ -111,7 +112,9 @@ cmp "$job_root/unwrapped.bogi" "$job_root/c-restored.bogi"
 ```
 
 Rebuild/relink authority adapters against these matching reader headers and
-library. `bogi23_open` accepts unwrapped and v2 images; reads decompress owner
+library. Adapters that embed their own reader, such as the BIND dyndb
+copy in this repository, must also port these hooks into that embedded reader;
+relinking a shared library alone does not update such a private copy. `bogi23_open` accepts unwrapped and v2 images; reads decompress owner
 frames as needed. `ZIMDB_KEY_CACHE_BYTES` controls the owner-frame cache and
 takes precedence over the compatible `ZIMDB_BLOCK_CACHE_BYTES` name. The cache
 budget is not total RSS. `keycodec_smoke` reports an18-value statistics vector,
