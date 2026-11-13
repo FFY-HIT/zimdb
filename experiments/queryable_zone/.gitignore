@@ -1,2 +1,9 @@
 native_zone
 __pycache__/
+/component_probe
+/fingerprint_image
+/fingerprint_image_verify
+/order_census
+/reencode_image
+/reencode_image_column
+/column_accounting

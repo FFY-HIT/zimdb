@@ -30,6 +30,9 @@
 #include <unistd.h>
 #include <utility>
 #include <vector>
+#include <unordered_map>
+#include <charconv>
+#include <string_view>
 
 namespace fs = std::filesystem;
 using Clock = std::chrono::steady_clock;
@@ -44,6 +47,11 @@ constexpr uint32_t kPackedIndexFlag = 4;
 constexpr uint32_t kCowIndexFlag = 8;
 constexpr uint32_t kCompactKeyFlag = 16;
 constexpr uint32_t kNsec3NextKeyFlag = 32;
+constexpr uint32_t kRrsetPageFlag = 64;
+constexpr uint32_t kNsPoolFlag = 128;
+constexpr uint32_t kColumnPageFlag = 256;
+constexpr uint32_t kNsTemplateFlag = 512;
+constexpr uint32_t kNsec3PageLinkFlag = 1024;
 constexpr uint32_t kIndexRestartInterval = 16;
 constexpr size_t kPageTarget = 65536;
 constexpr size_t kMaxPage = 262144;
@@ -594,6 +602,8 @@ void read_zone(const std::string& path, const std::string& origin_text,
     ldns_rdf_deep_free(previous);
 }
 
+#include "flat_zone.inc"
+
 void read_hex_lines(const std::string& path, const std::function<void(const std::string&)>& consume) {
     FILE* input = std::fopen(path.c_str(), "rb");
     syscheck(input != nullptr, "open hex stream");
@@ -634,7 +644,17 @@ std::string index_key(const PageIndex& entry) {
     return std::string(reinterpret_cast<const char*>(entry.first_key), entry.first_key_length);
 }
 
-Bytes encode_page(const std::vector<Record>& records, bool pool, bool front, uint32_t flags = 0) {
+#include "ns_pool.inc"
+#include "column_page.inc"
+#include "column_page_v2.inc"
+#include "column_page_v3.inc"
+#include "rrset_page_codec.inc"
+
+Bytes encode_page(const std::vector<Record>& records, bool pool, bool front, uint32_t flags = 0, NsPoolBuilder* ns_pool = nullptr) {
+    if (flags & kNsec3PageLinkFlag) return encode_column_page_v3(records, front, flags, ns_pool);
+    if (flags & kNsTemplateFlag) return encode_column_page_v2(records, front, flags, ns_pool);
+    if (flags & kColumnPageFlag) return encode_column_page(records, front, flags, ns_pool);
+    if (flags & kRrsetPageFlag) return encode_rrset_page(records, front, flags, ns_pool);
     Bytes entries;
     Bytes definitions;
     std::map<std::string, uint32_t> pool_ids;
@@ -689,7 +709,11 @@ Bytes encode_page(const std::vector<Record>& records, bool pool, bool front, uin
     return raw;
 }
 
-std::vector<Record> decode_page(const Bytes& raw, bool pool, bool front, uint32_t flags = 0) {
+std::vector<Record> decode_page(const Bytes& raw, bool pool, bool front, uint32_t flags = 0, const NsPoolReader* ns_pool = nullptr) {
+    if (flags & kNsec3PageLinkFlag) return decode_column_page_v3(raw, front, flags, ns_pool);
+    if (flags & kNsTemplateFlag) return decode_column_page_v2(raw, front, flags, ns_pool);
+    if (flags & kColumnPageFlag) return decode_column_page(raw, front, flags, ns_pool);
+    if (flags & kRrsetPageFlag) return decode_rrset_page(raw, front, flags, ns_pool);
     size_t position = 0;
     uint32_t count = get32(raw.data(), raw.size(), position);
     uint32_t pool_count = get32(raw.data(), raw.size(), position);
@@ -805,7 +829,7 @@ bool frame_less(const SortFrame& left, const SortFrame& right) {
     return byte_less(left.wire, right.wire);
 }
 
-void write_sort_frame(FILE* output, const std::string& key, const std::string& wire) {
+void write_sort_frame(FILE* output, const std::string& key, std::string_view wire) {
     require(key.size() <= kMaxKey && wire.size() <= kMaxWire + 1, "run record exceeds protocol bound");
     uint8_t header[6] = {static_cast<uint8_t>(key.size()), static_cast<uint8_t>(key.size() >> 8),
                          static_cast<uint8_t>(wire.size()), static_cast<uint8_t>(wire.size() >> 8),
@@ -845,7 +869,8 @@ public:
         items_.reserve(max_items_);
     }
 
-    void add(const std::string& key, const std::string& wire) {
+    virtual ~NativeRunSorter() = default;
+    virtual void add(const std::string& key, std::string_view wire) {
         size_t bytes = key.size() + wire.size();
         require(bytes <= arena_.size(), "single run record exceeds configured arena");
         if (items_.size() == max_items_ || bytes > arena_.size() - used_) flush();
@@ -860,9 +885,9 @@ public:
         items_.push_back(item);
     }
 
-    void finish_runs() { flush(); }
+    virtual void finish_runs() { flush(); }
 
-    void prepare_merges() {
+    virtual void prepare_merges() {
         while (run_count_ > fan_in_) {
             uint64_t output_count = 0;
             for (uint64_t start = 0; start < run_count_; start += fan_in_) {
@@ -883,7 +908,7 @@ public:
         }
     }
 
-    void final_merge(const std::function<void(const SortFrame&)>& consume) {
+    virtual void final_merge(const std::function<void(const SortFrame&)>& consume) {
         if (run_count_) merge_group(pass_, 0, run_count_, consume);
     }
 
@@ -913,12 +938,17 @@ public:
         return spilled;
     }
 
-    double run_sort_write_seconds() const { return run_sort_write_seconds_; }
-    uint64_t initial_runs() const { return initial_runs_; }
-    uint64_t intermediate_passes() const { return intermediate_passes_; }
-    size_t arena_bytes() const { return arena_.size(); }
-    size_t index_bytes() const { return max_items_ * sizeof(Item); }
-    double memory_sort_seconds() const { return memory_sort_seconds_; }
+    virtual double run_sort_write_seconds() const { return run_sort_write_seconds_; }
+    virtual uint64_t initial_runs() const { return initial_runs_; }
+    virtual uint64_t intermediate_passes() const { return intermediate_passes_; }
+    virtual size_t arena_bytes() const { return arena_.size(); }
+    virtual size_t index_bytes() const { return max_items_ * sizeof(Item); }
+    virtual double memory_sort_seconds() const { return memory_sort_seconds_; }
+
+    virtual uint64_t primary_records() const { return 0; }
+    virtual uint64_t exception_records() const { return 0; }
+    virtual uint64_t owner_spill_runs() const { return 0; }
+    virtual uint64_t owner_spill_passes() const { return 0; }
 
 private:
     struct Item {
@@ -1028,24 +1058,27 @@ private:
     double memory_sort_seconds_ = 0;
 };
 
-PageIndex write_page_extent(FILE* output, const std::vector<Record>& records, uint32_t flags, unsigned codec) {
+#include "hierarchy_sorter.inc"
+
+PageIndex write_page_extent(FILE* output, const std::vector<Record>& records, uint32_t flags, unsigned codec, NsPoolBuilder* ns_pool = nullptr) {
     require(!records.empty(), "cannot store an empty page");
-    Bytes raw = encode_page(records, flags & kPoolFlag, flags & kFrontFlag, flags);
+    Bytes raw = encode_page(records, flags & kPoolFlag, flags & kFrontFlag, flags, ns_pool);
     Bytes compressed;
     unsigned actual_codec = 0;
-    if (codec == 1) {
+    unsigned outer_codec = flags & kColumnPageFlag ? 0 : codec;
+    if (outer_codec == 1) {
         compressed.resize(LZ4_compressBound(raw.size()));
         int result = LZ4_compress_default(reinterpret_cast<const char*>(raw.data()),
                                           reinterpret_cast<char*>(compressed.data()), raw.size(), compressed.size());
         require(result > 0, "LZ4 encoding failed");
         compressed.resize(result);
-    } else if (codec == 2) {
+    } else if (outer_codec == 2) {
         compressed.resize(ZSTD_compressBound(raw.size()));
         size_t result = ZSTD_compress(compressed.data(), compressed.size(), raw.data(), raw.size(), 3);
         require(!ZSTD_isError(result), "Zstd encoding failed");
         compressed.resize(result);
     }
-    if (codec && compressed.size() < raw.size()) actual_codec = codec;
+    if (outer_codec && compressed.size() < raw.size()) actual_codec = outer_codec;
     const Bytes& stored = actual_codec ? compressed : raw;
     PageIndex entry{};
     off_t offset = ::ftello(output);
@@ -1295,11 +1328,13 @@ public:
         require(std::memcmp(header_.magic, "ZIMDNS1\0", 8) == 0 && header_.version == kVersion,
                 "unsupported image format");
         require(header_.header_size == sizeof(ImageHeader) && header_.origin_length > 0 &&
-                header_.origin_length <= 255 && !(header_.flags & ~(kPoolFlag | kFrontFlag | kPackedIndexFlag | kCowIndexFlag | kCompactKeyFlag | kNsec3NextKeyFlag)) &&
+                header_.origin_length <= 255 && !(header_.flags & ~(kPoolFlag | kFrontFlag | kPackedIndexFlag | kCowIndexFlag | kCompactKeyFlag | kNsec3NextKeyFlag | kRrsetPageFlag | kNsPoolFlag | kColumnPageFlag | kNsTemplateFlag | kNsec3PageLinkFlag)) &&
                 !((header_.flags & kPackedIndexFlag) && (header_.flags & kCowIndexFlag)),
                 "invalid image header");
         require(header_.index_offset >= sizeof(ImageHeader) && header_.index_offset <= size_ &&
                 final_index_bytes(header_) <= size_ - header_.index_offset, "invalid index range");
+        require(!(header_.flags & kNsPoolFlag) || ((header_.flags & kRrsetPageFlag) && (header_.flags & kCowIndexFlag)), "shared NS pool requires RRset/COW layout");
+        if (header_.flags & kNsPoolFlag) ns_pool_ = std::make_unique<NsPoolReader>(data_, committed_bytes(), header_);
         if (header_.flags & kPackedIndexFlag) {
             std::memcpy(&packed_meta_, header_.reserved, sizeof(packed_meta_));
             require(packed_meta_.restart_count == (header_.page_count + kIndexRestartInterval - 1) / kIndexRestartInterval &&
@@ -1418,7 +1453,7 @@ public:
             require(!ZSTD_isError(result) && result == raw.size(), "Zstd page decode failure");
         }
         require(checksum(raw.data(), raw.size()) == descriptor.checksum, "page checksum mismatch");
-        auto records = decode_page(raw, header_.flags & kPoolFlag, header_.flags & kFrontFlag, header_.flags);
+        auto records = decode_page(raw, header_.flags & kPoolFlag, header_.flags & kFrontFlag, header_.flags, ns_pool_.get());
         require(records.size() == descriptor.record_count && !records.empty() &&
                 records.front().key == index_key(descriptor), "page directory mismatch");
         return records;
@@ -1545,6 +1580,7 @@ private:
     std::string origin_;
     fs::path data_path_;
     fs::path snapshot_path_;
+    std::unique_ptr<NsPoolReader> ns_pool_;
     PackedIndexMeta packed_meta_{};
     CowIndexMeta cow_meta_{};
     mutable uint64_t cached_index_group_ = std::numeric_limits<uint64_t>::max();
@@ -1619,8 +1655,11 @@ public:
         meta.root = root;
         meta.created_node_bytes = created_bytes;
         meta.created_node_count = created_nodes;
+        NsPoolMeta saved_pool{};
+        if (header.flags & kNsPoolFlag) std::memcpy(&saved_pool, header.reserved + sizeof(CowIndexMeta), sizeof(saved_pool));
         std::memset(header.reserved, 0, sizeof(header.reserved));
         std::memcpy(header.reserved, &meta, sizeof(meta));
+        if (header.flags & kNsPoolFlag) std::memcpy(header.reserved + sizeof(CowIndexMeta), &saved_pool, sizeof(saved_pool));
         header.flags = (header.flags | kCowIndexFlag) & ~kPackedIndexFlag;
         header.page_count = root.pages;
         off_t tail = ::ftello(data_);
@@ -1850,7 +1889,7 @@ int build_command(const Options& options) {
             "sort-memory-mib must reserve at least half total workspace");
     require(sort_fan_in >= 2 && sort_fan_in <= 16, "sort-fan-in must be within 2..16");
     std::string sort_engine = options.get("sort-engine", "native");
-    require(sort_engine == "native" || sort_engine == "gnu", "sort-engine must be native or gnu");
+    require(sort_engine == "native" || sort_engine == "gnu" || sort_engine == "hierarchy", "sort-engine must be native, gnu or hierarchy");
     unsigned long run_memory_mib = std::stoul(options.get("run-memory-mib", std::to_string(memory_mib / 4)));
     require(run_memory_mib >= 1 && run_memory_mib <= memory_mib / 2,
             "run-memory-mib must reserve at least half total workspace");
@@ -1870,7 +1909,21 @@ int build_command(const Options& options) {
     std::string next_key_value = options.get("nsec3-next-key", "0");
     require(next_key_value == "0" || next_key_value == "1", "nsec3-next-key must be 0 or 1");
     bool next_key = next_key_value == "1";
-    uint32_t image_flags = (pool ? kPoolFlag : 0) | (front ? kFrontFlag : 0) |
+    std::string page_layout = options.get("page-layout", "row");
+    require(page_layout == "row" || page_layout == "rrset" || page_layout == "columnar", "page-layout must be row, rrset or columnar");
+    require(page_layout == "row" || !pool, "RRset layout uses its own page-local dictionary; choose --pool none");
+    unsigned long ns_pool_entries = std::stoul(options.get("ns-pool-entries", "0"));
+    require(ns_pool_entries <= 65536, "ns-pool-entries must be within 0..65536");
+    require(!ns_pool_entries || (page_layout != "row" && index_format == "cow" && memory_mib >= 64), "NS pool requires RRset/COW layout and at least 64 MiB workspace");
+    std::unique_ptr<NsPoolBuilder> ns_pool_builder;
+    if (ns_pool_entries) ns_pool_builder = std::make_unique<NsPoolBuilder>(ns_pool_entries);
+    require(page_layout != "columnar" || codec == 2, "columnar layout currently supports Zstd3 components only");
+    require(page_layout != "columnar" || !next_key, "columnar layout requires --nsec3-next-key 0 for typed RDATA");
+    bool ns_templates=options.get("ns-templates","0")=="1";
+    require(!ns_templates||page_layout=="columnar","NS templates require columnar pages");
+    bool nsec3_links=options.get("nsec3-links","0")=="1";
+    require(!nsec3_links||ns_templates,"NSEC3 page links require columnar NS-template representation");
+    uint32_t image_flags = (nsec3_links?kNsec3PageLinkFlag:0) | (ns_templates?kNsTemplateFlag:0) | (page_layout == "columnar" ? kColumnPageFlag : 0) | (ns_pool_entries ? kNsPoolFlag : 0) | (page_layout != "row" ? kRrsetPageFlag : 0) | (pool ? kPoolFlag : 0) | (front ? kFrontFlag : 0) |
                            (index_format == "packed" ? kPackedIndexFlag : 0) |
                            (index_format == "cow" ? kCowIndexFlag : 0) |
                            (key_codec == "compact" ? kCompactKeyFlag : 0) |
@@ -1882,25 +1935,47 @@ int build_command(const Options& options) {
     fs::path index_path = work / "page_index.bin";
     std::unique_ptr<NativeRunSorter> native_sorter;
     FILE* spool = nullptr;
-    if (sort_engine == "native")
+    if (sort_engine == "hierarchy") {
+        require(run_memory_mib >= 3, "hierarchy sort requires run-memory-mib >= 3");
+        native_sorter = std::make_unique<HierarchyRunSorter>(work, run_memory_mib, sort_fan_in);
+    } else if (sort_engine == "native")
         native_sorter = std::make_unique<NativeRunSorter>(work, run_memory_mib, sort_fan_in);
     else {
         spool = std::fopen(spool_path.c_str(), "wb");
         syscheck(spool != nullptr, "open canonical spool");
         std::setvbuf(spool, nullptr, _IOFBF, 65536);
     }
+    std::string input_syntax = options.get("input-syntax", "master");
+    require(input_syntax == "master" || input_syntax == "flat", "input-syntax must be master or flat");
+    require(input_syntax != "flat" || memory_mib >= 16, "flat normalization requires at least 16 MiB workspace");
+    std::string sort_tuple = options.get("sort-tuple", "wire");
+    require(sort_tuple == "wire" || sort_tuple == "body", "sort-tuple must be wire or body");
+    bool body_tuple = sort_tuple == "body";
+    std::string cached_owner_wire, cached_sort_key;
     uint64_t occurrences = 0;
     auto parser_start = Clock::now();
     auto consume = [&](const std::string& wire) {
-        auto record = record_from_wire(wire, origin, image_flags);
-        if (native_sorter) native_sorter->add(record.key, wire);
+        size_t owner_length = wire_name_length(reinterpret_cast<const uint8_t*>(wire.data()), wire.size());
+        require(wire.size() - owner_length >= 10, "truncated source wire");
+        const uint8_t* h = reinterpret_cast<const uint8_t*>(wire.data()+owner_length);
+        require(wire.size()-owner_length-10 == static_cast<size_t>((h[8]<<8)|h[9]), "source RDLENGTH mismatch");
+        if (cached_owner_wire.size()!=owner_length || std::memcmp(cached_owner_wire.data(),wire.data(),owner_length)!=0) {
+            cached_owner_wire.assign(wire.data(),owner_length);
+            cached_sort_key = make_key(cached_owner_wire,origin,image_flags);
+        }
+        std::string_view tuple(wire);
+        if (body_tuple) tuple.remove_prefix(owner_length);
+        if (native_sorter) native_sorter->add(cached_sort_key, tuple);
         else {
-            std::string row = hex(record.key) + '\t' + hex(wire) + '\n';
+            std::string row = hex(cached_sort_key) + '\t' + hex(reinterpret_cast<const uint8_t*>(tuple.data()),tuple.size()) + '\n';
             write_all(spool, row.data(), row.size());
         }
         ++occurrences;
     };
-    if (!options.get("zone").empty()) read_zone(options.get("zone"), origin_text, consume);
+    if (!options.get("zone").empty()) {
+        if (input_syntax == "flat") read_flat_zone(options.get("zone"), origin_text, consume);
+        else read_zone(options.get("zone"), origin_text, consume);
+    }
     else read_hex_lines(options.get("input-wire-hex"), consume);
     if (native_sorter) native_sorter->finish_runs();
     else syscheck(std::fclose(spool) == 0, "close canonical spool");
@@ -1962,7 +2037,7 @@ int build_command(const Options& options) {
     size_t page_estimate = 12;
     auto flush_page = [&]() {
         if (page_records.empty()) return;
-        PageIndex entry = write_page_extent(output, page_records, header.flags, codec);
+        PageIndex entry = write_page_extent(output, page_records, header.flags, codec, ns_pool_builder.get());
         if (cow_builder) cow_builder->add(entry);
         else write_all(index_output, &entry, sizeof(entry));
         decoded_total += entry.decoded_size;
@@ -1991,13 +2066,24 @@ int build_command(const Options& options) {
     bool has_pending = false;
     uint64_t observed_occurrences = 0;
     auto consume_sorted = [&](const std::string& sorted_key, const std::string& wire) {
-        Record record = record_from_wire(wire, origin, image_flags);
-        require(record.key == sorted_key, "canonical sort key mismatch");
+        Record record;
+        if (body_tuple) {
+            require(wire.size() >= 10 && wire.size()-10 == ((static_cast<size_t>(static_cast<uint8_t>(wire[8]))<<8) | static_cast<uint8_t>(wire[9])), "invalid sorted RR body");
+            record.key = sorted_key;
+            const auto* h = reinterpret_cast<const uint8_t*>(wire.data());
+            record.type = (h[0]<<8)|h[1];
+            record.klass = (h[2]<<8)|h[3];
+            record.ttl = (static_cast<uint32_t>(h[4])<<24) | (static_cast<uint32_t>(h[5])<<16) | (static_cast<uint32_t>(h[6])<<8) | h[7];
+            record.rdata.assign(wire.data()+10,wire.size()-10);
+        } else {
+            record = record_from_wire(wire, origin, image_flags);
+            require(record.key == sorted_key, "canonical sort key mismatch");
+        }
         if (has_pending) require(!byte_less(sorted_key, previous_sort_key) &&
                                   (sorted_key != previous_sort_key || !byte_less(wire, previous_wire)),
                                   "external ordering comparator failure");
         ++observed_occurrences;
-        if (has_pending && wire == previous_wire) {
+        if (has_pending && sorted_key == previous_sort_key && wire == previous_wire) {
             require(pending.multiplicity != std::numeric_limits<uint64_t>::max(), "multiplicity overflow");
             ++pending.multiplicity;
         } else {
@@ -2030,6 +2116,8 @@ int build_command(const Options& options) {
     require(observed_occurrences == occurrences, "sort lost RR occurrences");
     if (has_pending) emit(std::move(pending));
     flush_page();
+    NsPoolMeta ns_pool_meta{};
+    if (ns_pool_builder) ns_pool_meta = ns_pool_builder->write(output);
     uint64_t index_bytes = 0;
     if (cow_builder) {
         CowRef root = cow_builder->finish();
@@ -2042,6 +2130,7 @@ int build_command(const Options& options) {
         header.index_offset = index_offset;
         index_bytes = append_final_index(output, index_path, header);
     }
+    if (ns_pool_builder) std::memcpy(header.reserved + sizeof(CowIndexMeta), &ns_pool_meta, sizeof(ns_pool_meta));
     syscheck(::fseeko(output, 0, SEEK_SET) == 0, "seek final header");
     write_all(output, &header, sizeof(header));
     syscheck(std::fflush(output) == 0, "flush final image");
@@ -2073,13 +2162,27 @@ int build_command(const Options& options) {
         "\"origin\":" + json_string(name_text(origin)) + ",\"input_model\":\"unordered_external_sort\","
         "\"memory_mib\":" + std::to_string(memory_mib) + ",\"sort_memory_mib\":" + std::to_string(sort_memory_mib) +
         ",\"sort_fan_in\":" + std::to_string(sort_fan_in) +
+        ",\"sort_tuple\":" + json_string(sort_tuple) +
+        ",\"input_syntax\":" + json_string(input_syntax) +
+        ",\"owner_key_context_reuse\":true" +
         ",\"sort_engine\":" + json_string(sort_engine) +
         ",\"run_memory_mib\":" + std::to_string(run_memory_mib) +
         ",\"run_sort_write_seconds_nested_in_parse\":" +
              std::to_string(native_sorter ? native_sorter->run_sort_write_seconds() : 0) +
+        ",\"run_counter_scope\":\"initial_runs and intermediate_merge_passes cover main/exception outputs; owner spills reported separately\"" +
+        ",\"owner_local_spill_runs\":" + std::to_string(native_sorter ? native_sorter->owner_spill_runs() : 0) +
+        ",\"owner_local_spill_passes_sum\":" + std::to_string(native_sorter ? native_sorter->owner_spill_passes() : 0) +
+        ",\"primary_records\":" + std::to_string(native_sorter ? native_sorter->primary_records() : 0) +
+        ",\"exception_records\":" + std::to_string(native_sorter ? native_sorter->exception_records() : 0) +
         ",\"initial_runs\":" + std::to_string(native_sorter ? native_sorter->initial_runs() : 0) +
         ",\"intermediate_merge_passes\":" + std::to_string(native_sorter ? native_sorter->intermediate_passes() : 0) +
         ",\"codec\":" + json_string(codec_name) + ",\"pool\":" + json_string(pool_name) + ",\"front_code\":" + (front ? "true" : "false") +
+        ",\"ns_pool_entries\":" + std::to_string(ns_pool_meta.entries) +
+        ",\"ns_pool_bytes\":" + std::to_string(ns_pool_meta.stored_bytes) +
+        ",\"ns_pool_raw_bytes\":" + std::to_string(ns_pool_meta.raw_bytes) +
+        ",\"ns_pool_blocks\":" + std::to_string(ns_pool_meta.blocks) +
+        ",\"page_codec_scope\":" + json_string(page_layout == "columnar" ? "independent Zstd3 components with opaque literal stream; outer pages are containers" : "outer page codec") +
+        ",\"page_layout\":" + json_string(page_layout) +
         ",\"index_format\":" + json_string(index_format) +
         ",\"key_codec\":" + json_string(key_codec) +
         ",\"nsec3_next_key\":" + (next_key ? "true" : "false") +
