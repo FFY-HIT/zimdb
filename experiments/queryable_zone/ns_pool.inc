@@ -33,6 +33,15 @@ public:
         ids_.reserve(limit);
 #endif
     }
+    bool seal_for_parallel() {
+#if ZIMDB_VIEW_INTERN
+        return false;
+#else
+        // This is written once, before the first worker is submitted.
+        if(!sealed_&&tagged_counts_[0]>=limit_/2&&tagged_counts_[1]>=limit_/2)sealed_=true;
+        return sealed_;
+#endif
+    }
     bool intern(const Bytes& bytes,uint32_t& id) {
 #if ZIMDB_VIEW_INTERN
         return intern_span(std::string_view(reinterpret_cast<const char*>(bytes.data()),bytes.size()),id,-1);
@@ -48,6 +57,16 @@ public:
     }
     bool intern_tagged(const Bytes& bytes,uint32_t& id,char tag) {
         require(tag=='S'||tag=='T',"invalid pool namespace");
+#if !ZIMDB_VIEW_INTERN
+        if(sealed_){
+            Bytes tagged;tagged.reserve(bytes.size()+1);tagged.push_back(tag);
+            tagged.insert(tagged.end(),bytes.begin(),bytes.end());
+            std::string identity(reinterpret_cast<const char*>(tagged.data()),tagged.size());
+            const auto&readonly_ids=ids_;auto found=readonly_ids.find(identity);
+            if(found==readonly_ids.end())return false;
+            id=found->second;return true;
+        }
+#endif
 #if ZIMDB_VIEW_INTERN
         return intern_span(std::string_view(reinterpret_cast<const char*>(bytes.data()),bytes.size()),id,static_cast<unsigned char>(tag));
 #else
@@ -96,6 +115,7 @@ public:
     }
 private:
     uint32_t limit_;
+    bool sealed_=false;
     std::array<uint32_t,2>tagged_counts_{};
     uint64_t raw_=0;
 #if ZIMDB_VIEW_INTERN

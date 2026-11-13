@@ -50,3 +50,14 @@ novelty. `ZIMDB_LAZY_CHECK_TEXT=0` retains the former path for ablation. The
 single isolated 10,000-page screen is retained with source/input before/after
 hashes and probe binary hashes captured after execution. Output and check-failure
 behavior match. Whole-build benefit needs a separate same-protocol cloud case.
+
+`--encode-workers 2` enables a bounded page pipeline once both tagged dictionary
+quotas close. Admission remains sequential. A closed dictionary is probed through
+const lookups; independent page encoding runs in fixed workers and extents/COW
+index entries are committed in original order. At most workers+1 jobs are in
+flight, and a dictionary that never closes retains sequential construction.
+The configured worker count bounds added page workspaces; total process RSS is
+still measured rather than asserted equal to the configured memory limit.
+Worker1 is the serial ablation. Independent regressions cover caps0/64/65536,
+workers1/2/4, unknown/non-20-byte DNSSEC, duplicates, shuffled input, never-closing
+dictionary fallback, worker exception propagation and generation updates.

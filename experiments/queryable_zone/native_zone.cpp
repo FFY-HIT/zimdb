@@ -34,6 +34,11 @@
 #include <charconv>
 #include <string_view>
 #include <exception>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <deque>
+#include <future>
 #ifdef ZIMDB_USE_SIMDZONE
 #include <zone.h>
 #endif
@@ -1114,6 +1119,8 @@ PageIndex write_page_extent(FILE* output, const std::vector<Record>& records, ui
     return entry;
 }
 
+#include "page_pipeline.inc"
+
 uint64_t append_final_index(FILE* output, const fs::path& fixed_path, ImageHeader& header) {
     require(header.page_count <= std::numeric_limits<uint64_t>::max() / sizeof(PageIndex) &&
             fs::file_size(fixed_path) == header.page_count * sizeof(PageIndex), "fixed staging index count mismatch");
@@ -1965,6 +1972,10 @@ int build_command(const Options& options) {
         std::setvbuf(spool, nullptr, _IOFBF, 65536);
     }
     std::string input_syntax = options.get("input-syntax", "master");
+    unsigned long encode_workers=std::stoul(options.get("encode-workers","1"));
+    require(encode_workers>=1&&encode_workers<=8,"encode-workers must be within1..8");
+    require(encode_workers==1||((image_flags&kNsec3PageLinkFlag)&&index_format=="cow"&&memory_mib>=32),
+            "parallel pages require linked columns/COW and at least32MiB");
     require(input_syntax == "master" || input_syntax == "flat" || input_syntax == "simd", "input-syntax must be master, flat or simd");
 #ifndef ZIMDB_USE_SIMDZONE
     require(input_syntax != "simd", "simd input requires a simdzone-enabled build");
@@ -2060,16 +2071,43 @@ int build_command(const Options& options) {
     bool has_previous_owner = false;
     std::vector<Record> page_records;
     size_t page_estimate = 12;
-    auto flush_page = [&]() {
-        if (page_records.empty()) return;
-        PageIndex entry = write_page_extent(output, page_records, header.flags, codec, ns_pool_builder.get());
+    std::unique_ptr<ColumnPageWorkers> page_workers;
+    std::deque<std::future<PreparedColumnPage>> encoded_jobs;
+    uint64_t parallel_pages=0,sequential_pages=0,max_inflight_pages=0,pipeline_start_page=0;
+    auto account_page = [&](const PageIndex&entry) {
         if (cow_builder) cow_builder->add(entry);
         else write_all(index_output, &entry, sizeof(entry));
         decoded_total += entry.decoded_size;
         encoded_total += entry.encoded_size;
         if (entry.codec) ++compressed_pages; else ++plain_pages;
         ++header.page_count;
-        page_records.clear();
+    };
+    auto commit_one = [&]() {
+        require(!encoded_jobs.empty(),"missing in-flight page");
+        PreparedColumnPage ready=encoded_jobs.front().get();encoded_jobs.pop_front();
+        off_t offset=::ftello(output);syscheck(offset>=0,"parallel page output offset");
+        ready.descriptor.offset=offset;write_all(output,ready.bytes.data(),ready.bytes.size());
+        account_page(ready.descriptor);
+    };
+    auto flush_page = [&]() {
+        if (page_records.empty()) return;
+        bool closed=encode_workers>1&&(!ns_pool_builder||ns_pool_builder->seal_for_parallel());
+        if(closed){
+            if(!page_workers){
+                pipeline_start_page=header.page_count;
+                page_workers=std::make_unique<ColumnPageWorkers>(encode_workers);
+                stage("page_pipeline_ready",seconds_since(encode_start),"\"sequential_pages\":"+std::to_string(sequential_pages));
+            }
+            encoded_jobs.push_back(page_workers->submit(std::move(page_records),header.flags,ns_pool_builder.get()));
+            ++parallel_pages;max_inflight_pages=std::max<uint64_t>(max_inflight_pages,encoded_jobs.size());
+            require(encoded_jobs.size()<=encode_workers+1,"in-flight page bound");
+            if(encoded_jobs.size()==encode_workers+1)commit_one();
+            page_records={};page_records.reserve(1024);
+        }else{
+            require(encoded_jobs.empty(),"dictionary reopened after parallel encoding");
+            account_page(write_page_extent(output,page_records,header.flags,codec,ns_pool_builder.get()));
+            ++sequential_pages;page_records.clear();
+        }
         page_estimate = 12;
     };
     auto emit = [&](Record record) {
@@ -2141,6 +2179,9 @@ int build_command(const Options& options) {
     require(observed_occurrences == occurrences, "sort lost RR occurrences");
     if (has_pending) emit(std::move(pending));
     flush_page();
+    while(!encoded_jobs.empty())commit_one();
+    page_workers.reset();
+    require(parallel_pages+sequential_pages==header.page_count,"pipeline page accounting mismatch");
     NsPoolMeta ns_pool_meta{};
     if (ns_pool_builder) ns_pool_meta = ns_pool_builder->write(output);
     uint64_t index_bytes = 0;
@@ -2189,6 +2230,12 @@ int build_command(const Options& options) {
         ",\"sort_fan_in\":" + std::to_string(sort_fan_in) +
         ",\"sort_tuple\":" + json_string(sort_tuple) +
         ",\"input_syntax\":" + json_string(input_syntax) +
+        ",\"encode_workers_requested\":" + std::to_string(encode_workers) +
+        ",\"pipeline_activated\":" + std::string(parallel_pages?"true":"false") +
+        ",\"pipeline_start_page\":" + std::to_string(pipeline_start_page) +
+        ",\"pipeline_parallel_pages\":" + std::to_string(parallel_pages) +
+        ",\"pipeline_sequential_pages\":" + std::to_string(sequential_pages) +
+        ",\"pipeline_max_inflight_pages\":" + std::to_string(max_inflight_pages) +
         ",\"owner_key_context_reuse\":true" +
         ",\"sort_engine\":" + json_string(sort_engine) +
         ",\"run_memory_mib\":" + std::to_string(run_memory_mib) +
