@@ -155,7 +155,7 @@ def main():
                             'reencoded_owners':stats.get('reencoded_owners')},
                    'W_io_write_bytes':io_writes,
                    'W_image_bytes':stats.get('rewrite_bytes'),
-                   'W_changed_live_sst_bytes':stats.get('changed_live_sst_bytes'),
+                   'W_changed_live_sst_bytes':stats.get('new_or_changed_live_sst_bytes'),
                    'retained_size':retained,'diagnostic_inclusive_size':directory_size(payload,True),
                    'update_durable_seconds':measured['durable_wall_seconds'],
                    'update_sampled_tree_rss_kib':measured['sampled_tree_peak_rss_kib'],

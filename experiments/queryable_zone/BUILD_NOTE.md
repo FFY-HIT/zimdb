@@ -5,7 +5,7 @@
 | F0 | Native source-to-image and tree-free lookup spine | validate.py --run-fixture with the archived binary | implemented, checks passed |
 | F1 | Exact RR multiset and full name semantics | validate.py source/image/oracle qualification, plus semantic fixtures | agency G1 and generic semantics passed for qualified versions |
 | F2 | Fixed-budget P2 performance | run_round.py --round FRESH --cases native_cow_zstd dnsrocks_control_zstd64k | measured; same-Z DNSRocks comparison passed, strict old-path threshold unverified |
-| F3 | P1 pool/front-code/block-compression experiment | five r04 ablations and independent G1 | measured, 5x size target unmet; additional key-transform experiment pending |
+| F3 | P1 pool/front-code/block-compression experiment | five r04 ablations and independent G1, plus r12 key-transform G1 | measured and qualified, 5x size target unmet |
 | F4 | Atomic dirty-interval generation update | validate_updates.py against three delta sizes and retained roots | r06/r09 and full-reencode controls passed; ordered-input r11 only small is qualified |
 
 ## Run record
@@ -41,8 +41,10 @@ P1 >5x is unmet. The current best agency image24,836,286B is1.0947x smaller than
 
 P2's strict ratio against the old materialized path is unverified because that old output fails the requested multiset contract. Same-Z comparisons against the qualified native DNSRocks builder are valid. No full COM native ZimDB build or multi-size scaling result has been measured in this campaign.
 
-P3 dirty-interval scaling is observed and all three r09 deltas passed G1. Medium and whole changes still write more than the stock native DNSRocks updater. That updater produces NoCompression new L0 SSTs over the retained Zstd base. A forced full-reencode control does not describe all LSM updates.
+P3 dirty-interval scaling is observed and all three r09 deltas passed G1. The largest workload replaces all eligible unsigned delegation NS RRsets by TTL+1, covering123806 owners and294314 occurrences; all other records and DNSSEC bytes remain retained. Medium and largest changes still write more than the stock native DNSRocks updater. That updater produces NoCompression new L0 SSTs over the retained Zstd base. A forced full-reencode control does not describe all LSM updates.
 
 The owner-ordered input assumption for r11 medium was experimentally falsified. No medium/whole owner-mode result is inferred. Reordering preparation would need its own resource receipt before an unordered-input claim.
 
-This research format and harness are local experimental changes. They have not been integrated into a production authoritative-server path or pushed to the public repository. Algorithmic novelty and the final silent-assumption sweep remain unverified.
+Queries currently use absolute in-origin names and an owner/type namespace over stored classes. All formal zone/query evidence is IN. ANY/0 is a private all-types selector distinct from literal255. The image still retains each RR class/type in full canonical export. Source-text missing-TTL seed3600, strict old-state delta removal semantics, common TAB/LF delta grammar, little-endian platform admission and codec/raw fallback policy are declared in the ledger.
+
+The first same-family provisional silent-assumption sweep found9 missing contracts and3 stale protocol rows. The contracts have been recorded and the stale rows are being corrected before a second sweep. No acquittal or algorithmic-novelty claim follows from this review. These research-format and harness changes remain local experimental code and have not been integrated into the public authoritative-server path.
