@@ -1133,7 +1133,7 @@ uint64_t append_final_index(FILE* output, const fs::path& fixed_path, ImageHeade
     return meta.data_bytes + meta.restart_count * sizeof(IndexRestart);
 }
 
-fs::path resolve_snapshot_path(fs::path path) {
+fs::path resolve_snapshot_path(fs::path path, bool require_initial_pointer = false) {
     path = fs::absolute(path).lexically_normal();
     for (unsigned hop = 0; hop < 8; ++hop) {
         std::ifstream input(path, std::ios::binary);
@@ -1142,7 +1142,10 @@ fs::path resolve_snapshot_path(fs::path path) {
         input.read(magic.data(), magic.size());
         if (input.gcount() == static_cast<std::streamsize>(magic.size()) &&
             (std::memcmp(magic.data(), "ZIMDNS1\0", 8) == 0 ||
-             std::memcmp(magic.data(), "ZIMGEN1\0", 8) == 0)) return path;
+             std::memcmp(magic.data(), "ZIMGEN1\0", 8) == 0)) {
+            require(!require_initial_pointer || hop != 0, "CURRENT replacement target must be a text pointer");
+            return path;
+        }
         require(fs::file_size(path) > 0 && fs::file_size(path) <= 4097, "unsupported image or CURRENT format");
         input.clear();
         input.seekg(0);
@@ -2351,7 +2354,7 @@ Bytes generation_descriptor(const fs::path& destination, const fs::path& data_fi
 void check_current(const Options& options, const Image& source) {
     fs::path current_path = options.get("current");
     if (current_path.empty() || !fs::exists(current_path)) return;
-    fs::path selected = resolve_snapshot_path(current_path);
+    fs::path selected = resolve_snapshot_path(current_path, true);
     require(fs::equivalent(selected, source.snapshot_path()), "CURRENT generation conflict");
 }
 

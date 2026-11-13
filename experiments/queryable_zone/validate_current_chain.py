@@ -61,12 +61,24 @@ def main():
     assert stale.returncode != 0 and b'CURRENT generation conflict' in stale.stderr
     assert not (root/'stale_rejected.zg').exists()
     assert base.stat().st_size == before_stale
+    for label, immutable in [('base',base),('generation',root/'generation1.zg')]:
+        immutable_before = immutable.read_bytes()
+        data_size_before = base.stat().st_size
+        invalid = run(args.binary,'update','--image',immutable,'--delta',delta,
+                      '--out',root/(label+'_invalid.zg'),'--current',immutable,
+                      '--work',root/(label+'_invalid_work'),'--memory-mib','16')
+        assert invalid.returncode != 0 and b'must be a text pointer' in invalid.stderr
+        assert immutable.read_bytes() == immutable_before
+        assert base.stat().st_size == data_size_before
+        assert not (root/(label+'_invalid.zg')).exists()
     receipt = {'status':'PASS','qualification_only':True,
                'old_binary_sha256':sha(args.old_binary.read_bytes()),
                'binary_sha256':sha(args.binary.read_bytes()),
                'base':str(args.base),'old_reader_accepts_chain':True,
                'old_updater_rejects_same_chain':True,'fixed_updater_accepts_chain':True,
                'stale_snapshot_rejected_before_append':True,
+               'binary_image_current_rejected_before_append':True,
+               'binary_generation_current_rejected_before_append':True,
                'retained_old_prefix_identical':True,'wire_occurrences':before.stdout.count(b'\n'),
                'wire_export_identical':True,'wire_export_sha256':sha(before.stdout),
                'old_failure':old.stderr.decode(),'stale_failure':stale.stderr.decode()}
