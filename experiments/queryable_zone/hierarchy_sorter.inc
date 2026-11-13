@@ -1,6 +1,14 @@
 // Selective order restoration. Verified monotone shallow-owner groups bypass
 // global sorting. Arbitrarily disordered or deeper owners use bounded external
 // sorting, followed by one exact merge with the monotone primary stream.
+void close_owned_stream_checked(FILE*& stream, const char* operation) {
+    if (!stream) return;
+    FILE* closing = stream;
+    // fclose consumes the stream even when it reports a flush/close error.
+    stream = nullptr;
+    syscheck(std::fclose(closing) == 0, operation);
+}
+
 class HierarchyRunSorter : public NativeRunSorter {
 public:
     HierarchyRunSorter(fs::path work, unsigned arena_mib, unsigned fan_in)
@@ -38,8 +46,7 @@ public:
     void finish_runs() override {
         finish_current_owner();
         primary_writer_->flush();
-        syscheck(std::fclose(primary_)==0,"close monotone primary run");
-        primary_=nullptr;
+        close_owned_stream_checked(primary_,"close monotone primary run");
         exceptions_.finish_runs();
     }
     void prepare_merges() override { exceptions_.prepare_merges(); }
@@ -67,8 +74,8 @@ public:
             }
             require(primary_seen == primary_records_ && exceptions_seen == exception_records_,
                     "selective merge lost records");
-            syscheck(std::fclose(input)==0,"close monotone primary input");
-        } catch (...) { std::fclose(input); throw; }
+            close_owned_stream_checked(input,"close monotone primary input");
+        } catch (...) { if (input) std::fclose(input); throw; }
     }
     double run_sort_write_seconds() const override {
         return exceptions_.run_sort_write_seconds()+owner_.run_sort_write_seconds()+owner_.memory_sort_seconds();
