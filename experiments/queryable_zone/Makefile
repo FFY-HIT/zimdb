@@ -10,7 +10,7 @@ endif
 
 all: native_zone
 
-native_zone: native_zone.cpp rrset_page_codec.inc hierarchy_sorter.inc ns_pool.inc flat_zone.inc simd_zone.inc column_page.inc column_page_v2.inc column_page_v3.inc page_pipeline.inc
+native_zone: native_zone.cpp rrset_page_codec.inc hierarchy_sorter.inc owner_primary.inc ns_pool.inc flat_zone.inc simd_zone.inc column_page.inc column_page_v2.inc column_page_v3.inc page_pipeline.inc
 	$(CXX) $(CXXFLAGS) -o $@ $< $(LDLIBS)
 
 clean:

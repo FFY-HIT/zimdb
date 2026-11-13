@@ -13,6 +13,8 @@ public:
         primary_ = std::fopen((work_/"primary.bin").c_str(),"wb");
         syscheck(primary_,"create monotone primary run");
         std::setvbuf(primary_,nullptr,_IOFBF,65536);
+        try{primary_writer_=std::make_unique<OwnerPrimaryWriter>(primary_);}
+        catch(...){std::fclose(primary_);primary_=nullptr;throw;}
     }
     ~HierarchyRunSorter() override { if (primary_) std::fclose(primary_); }
 
@@ -25,7 +27,8 @@ public:
             primary_owner_ = labels <= 1 && (!has_primary_ || byte_less(last_primary_,key));
         }
         if (primary_owner_) {
-            owner_.add(key,wire);
+            owner_.add(std::string(),wire);
+            require(owner_records_!=UINT64_MAX,"primary group record count overflow");++owner_records_;
             ++primary_records_;
         } else {
             exceptions_.add(key,wire);
@@ -34,6 +37,7 @@ public:
     }
     void finish_runs() override {
         finish_current_owner();
+        primary_writer_->flush();
         syscheck(std::fclose(primary_)==0,"close monotone primary run");
         primary_=nullptr;
         exceptions_.finish_runs();
@@ -44,14 +48,14 @@ public:
         syscheck(input,"open monotone primary run");
         std::setvbuf(input,nullptr,_IOFBF,65536);
         try {
-            SortFrame current;
-            bool has_current = read_sort_frame(input,current);
+            OwnerPrimaryReader primary_reader(input);const SortFrame&current=primary_reader.frame();
+            bool has_current = primary_reader.next();
             uint64_t primary_seen = 0, exceptions_seen = 0;
             exceptions_.final_merge([&](const SortFrame& exception) {
                 while (has_current && frame_less(current,exception)) {
                     consume(current);
                     ++primary_seen;
-                    has_current = read_sort_frame(input,current);
+                    has_current = primary_reader.next();
                 }
                 consume(exception);
                 ++exceptions_seen;
@@ -59,7 +63,7 @@ public:
             while (has_current) {
                 consume(current);
                 ++primary_seen;
-                has_current = read_sort_frame(input,current);
+                has_current = primary_reader.next();
             }
             require(primary_seen == primary_records_ && exceptions_seen == exception_records_,
                     "selective merge lost records");
@@ -81,6 +85,8 @@ public:
         return exceptions_.memory_sort_seconds()+owner_.memory_sort_seconds();
     }
     uint64_t primary_records() const override { return primary_records_; }
+    uint64_t primary_groups() const override { return primary_groups_; }
+    uint64_t primary_bytes() const override { return primary_writer_?primary_writer_->bytes():0; }
     uint64_t exception_records() const override { return exception_records_; }
     uint64_t owner_spill_runs() const override { return owner_.initial_runs(); }
     uint64_t owner_spill_passes() const override { return owner_.intermediate_passes(); }
@@ -89,18 +95,23 @@ private:
     void finish_current_owner() {
         if (!has_owner_) return;
         if (primary_owner_) {
-            owner_.finish_owner([&](const SortFrame& frame) {
-                write_sort_frame(primary_,frame.key,frame.wire);
+            primary_writer_->begin_owner(current_owner_,owner_records_);uint64_t emitted=0;
+            owner_.finish_owner_body([&](std::string_view wire) {
+                primary_writer_->body(wire);++emitted;
             });
+            require(emitted==owner_records_,"primary group lost records");++primary_groups_;
             last_primary_=current_owner_;
             has_primary_=true;
         }
         has_owner_=false;
+        owner_records_=0;
     }
     fs::path work_;
     NativeRunSorter exceptions_,owner_;
     FILE* primary_=nullptr;
+    std::unique_ptr<OwnerPrimaryWriter>primary_writer_;
     std::string current_owner_,last_primary_;
     bool has_owner_=false,has_primary_=false,primary_owner_=false;
     uint64_t primary_records_=0,exception_records_=0;
+    uint64_t owner_records_=0,primary_groups_=0;
 };

@@ -61,3 +61,15 @@ still measured rather than asserted equal to the configured memory limit.
 Worker1 is the serial ablation. Independent regressions cover caps0/64/65536,
 workers1/2/4, unknown/non-20-byte DNSSEC, duplicates, shuffled input, never-closing
 dictionary fallback, worker exception propagation and generation updates.
+
+The primary construction run now factors an owner key once per verified
+monotone owner group. A group stores key length/key and an occurrence count;
+individual frames store a varint body length and the complete body. Owner-local
+sorting uses empty arena keys, and its output is written directly from bounded
+arena views, including the spill fallback. Reader/writer each own a64KiB buffer.
+Names in primary-run storage therefore scale with groups rather than RRs;
+exceptions retain their full-key external-sort representation. Persistent image
+bytes and DNS semantics do not change. `ZIMDB_GROUPED_PRIMARY=0` provides the
+buffered flat-frame ablation. Binary/wire tuples, huge-owner spills, deep-owner
+exceptions, legacy layouts, malformed framing and built-parent updates were
+qualified separately. Full COM performance remains an experimental measurement.

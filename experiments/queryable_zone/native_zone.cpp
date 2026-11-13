@@ -963,6 +963,15 @@ public:
     }
 
     virtual double run_sort_write_seconds() const { return run_sort_write_seconds_; }
+    bool finish_owner_body(const std::function<void(std::string_view)>&consume){
+        if(run_count_)return finish_owner([&](const SortFrame&frame){consume(frame.wire);});
+        auto start=Clock::now();sort_items();memory_sort_seconds_+=seconds_since(start);
+        for(const auto&item:items_){const char*data=reinterpret_cast<const char*>(arena_.data()+item.offset);
+            consume(std::string_view(data+item.key_length,item.wire_length));}
+        used_=0;items_.clear();return false;
+    }
+    virtual uint64_t primary_groups() const { return 0; }
+    virtual uint64_t primary_bytes() const { return 0; }
     virtual uint64_t initial_runs() const { return initial_runs_; }
     virtual uint64_t intermediate_passes() const { return intermediate_passes_; }
     virtual size_t arena_bytes() const { return arena_.size(); }
@@ -1082,6 +1091,7 @@ private:
     double memory_sort_seconds_ = 0;
 };
 
+#include "owner_primary.inc"
 #include "hierarchy_sorter.inc"
 
 PageIndex write_page_extent(FILE* output, const std::vector<Record>& records, uint32_t flags, unsigned codec, NsPoolBuilder* ns_pool = nullptr) {
@@ -2245,6 +2255,9 @@ int build_command(const Options& options) {
         ",\"owner_local_spill_runs\":" + std::to_string(native_sorter ? native_sorter->owner_spill_runs() : 0) +
         ",\"owner_local_spill_passes_sum\":" + std::to_string(native_sorter ? native_sorter->owner_spill_passes() : 0) +
         ",\"primary_records\":" + std::to_string(native_sorter ? native_sorter->primary_records() : 0) +
+        ",\"primary_owner_groups\":" + std::to_string(native_sorter ? native_sorter->primary_groups() : 0) +
+        ",\"primary_run_bytes\":" + std::to_string(native_sorter ? native_sorter->primary_bytes() : 0) +
+        ",\"primary_run_grouped\":" + std::string(sort_engine=="hierarchy"&&ZIMDB_GROUPED_PRIMARY?"true":"false") +
         ",\"exception_records\":" + std::to_string(native_sorter ? native_sorter->exception_records() : 0) +
         ",\"initial_runs\":" + std::to_string(native_sorter ? native_sorter->initial_runs() : 0) +
         ",\"intermediate_merge_passes\":" + std::to_string(native_sorter ? native_sorter->intermediate_passes() : 0) +
