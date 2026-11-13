@@ -1,7 +1,15 @@
+#ifndef ZIMDB_OWNER_RANK_VECTOR
+#define ZIMDB_OWNER_RANK_VECTOR 1
+#endif
 Bytes encode_column_page_v3(const std::vector<Record>&records,bool front,uint32_t flags,NsPoolBuilder*pool){
     (void)flags;
+#if ZIMDB_OWNER_RANK_VECTOR
+    std::vector<std::string_view>owner_ordinals;
+    for(const auto&r:records)if(owner_ordinals.empty()||owner_ordinals.back()!=r.key)owner_ordinals.emplace_back(r.key);
+#else
     std::map<std::string,uint32_t>owner_ordinals;
     for(const auto&r:records)if(!owner_ordinals.count(r.key))owner_ordinals.emplace(r.key,owner_ordinals.size());
+#endif
     std::array<Bytes,5>streams;auto&names=streams[0];auto&refs=streams[1];auto&meta=streams[2];
     auto&residual=streams[3];auto&opaque=streams[4];
     std::map<std::string,uint32_t>local_ids;std::vector<std::vector<Record>>definitions;
@@ -85,8 +93,18 @@ Bytes encode_column_page_v3(const std::vector<Record>&records,bool front,uint32_
                     std::string label=base32hex_hash(r.rdata.data()+hash_start);
                     std::string name(1,static_cast<char>(label.size()));name+=label;name.push_back('\0');
                     std::string next=make_key(name,std::string(1,'\0'),flags);
+#if ZIMDB_OWNER_RANK_VECTOR
+                    std::string_view target(next);
+                    auto found=std::lower_bound(owner_ordinals.begin(),owner_ordinals.end(),target,
+                        [](std::string_view a,std::string_view b){
+                            size_t n=std::min(a.size(),b.size());int c=n?std::memcmp(a.data(),b.data(),n):0;
+                            return c<0||(c==0&&a.size()<b.size());
+                        });
+                    if(found!=owner_ordinals.end()&&*found==target)reference=static_cast<uint64_t>(found-owner_ordinals.begin())+1;
+#else
                     auto found=owner_ordinals.find(next);
                     if(found!=owner_ordinals.end())reference=static_cast<uint64_t>(found->second)+1;
+#endif
                 }
                 put_varint(meta,reference);
                 if(reference){

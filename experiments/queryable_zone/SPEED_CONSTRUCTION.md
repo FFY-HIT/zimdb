@@ -30,3 +30,14 @@ The parser primitive comes from Koekkoek and Lemire, "Parsing Millions of DNS
 Records per Second", https://arxiv.org/abs/2411.12035. Reusing that primitive is
 not a new parsing algorithm or an adapter contribution. Full source-to-durable
 image time and RSS must be measured separately, under frozen source and code.
+
+The next isolated P2 iteration replaces the per-page owner-to-ordinal balanced
+tree with a sorted vector of non-owning unique-owner views. Preparing that
+index takes O(N), rather than O(N log G); only NSEC3 next-owner lookups perform
+binary search. Views refer to the immutable page input and use unsigned byte
+comparison. Missing next owners retain the literal fallback. The format and
+ordinals are unchanged. `ZIMDB_OWNER_RANK_VECTOR=0` retains the tree ablation.
+On the one-trial 10,000-page screen, encoder-only time changed from 5.14422 s
+to 4.33856 s, with identical component bytes and SHA256. This is a component
+screen, not whole-build time; it does not estimate variance. Source-derived
+multiset, case, semantics and update regressions passed independently.
