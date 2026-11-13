@@ -1,0 +1,33 @@
+$ORIGIN example.
+$TTL 300
+example. 300 IN SOA ns.example. hostmaster.example. 1 3600 600 86400 300
+example. 300 IN NS ns.example.
+ns.example. 300 IN A 192.0.2.1
+www.example. 300 IN A 192.0.2.2
+www.example. 300 IN NSEC alias.example. A NSEC RRSIG
+leaf.entblock.wildbase.example. 300 IN TXT "an empty nonterminal ancestor"
+*.wildbase.example. 300 IN A 192.0.2.3
+*.aliasbase.example. 300 IN CNAME www.example.
+leaf.*.emptywild.example. 300 IN TXT "an empty wildcard source"
+deleg.example. 300 IN NS ns.deleg.example.
+deleg.example. 300 IN DS 1234 8 2 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+ns.deleg.example. 300 IN A 192.0.2.4
+deep.deleg.example. 300 IN NS ns.deep.deleg.example.
+ns.deep.deleg.example. 300 IN A 192.0.2.5
+host.deep.deleg.example. 300 IN A 192.0.2.6
+alias.example. 300 IN CNAME www.example.
+dup.example. 300 IN A 192.0.2.7
+dup.example. 300 IN A 192.0.2.7
+dup.example. 301 IN A 192.0.2.7
+opaque.example. 300 IN TYPE65534 \# 4 deadbeef
+MiXeD.Example. 300 IN A 192.0.2.8
+x\046dot.example. 300 IN A 192.0.2.9
+oct\128et.example. 300 IN A 192.0.2.10
+nul\000label.example. 300 IN A 192.0.2.11
+farther.example. 300 IN A 192.0.2.12
+example. 300 IN DNSKEY 256 3 8 AQIDBAUGBwgJCgsMDQ4PEA==
+example. 300 IN RRSIG SOA 8 1 300 20300101000000 20260101000000 1234 example. AQIDBAUGBwgJCgsMDQ4PEA==
+example. 400 IN RRSIG NS 8 1 300 20300101000000 20260101000000 1234 example. ERITFBUWFxgZGhscHR4fIA==
+00000000000000000000000000000000.example. 300 IN NSEC3 1 0 0 - 00000000000000000000000000000001 A NS SOA RRSIG DNSKEY NSEC3PARAM
+example. 300 IN NSEC3PARAM 1 0 0 -
+example. 300 IN SOA ns.example. hostmaster.example. 1 3600 600 86400 300

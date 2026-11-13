@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "retrieval": {
+    "date": "2026-11-13",
+    "url": "https://dns.google/resolve?name=cloudflare.com&type=DNSKEY",
+    "dnssec_ad": true,
+    "documentation": "https://developers.cloudflare.com/dns/dnssec/dnssec-active-migration/"
+  },
+  "keys": [
+    {
+      "name": "Cloudflare KSK public dictionary candidate",
+      "dnskey_rdata": "257 3 13 mdsswUyr3DPW132mOi8V9xESWE8jTo0dxCjjnopKl+GqJxpVXckHAeF+KkxLbxILfDLUT0rAK9iUzy1L53eKGQ=="
+    }
+  ]
+}

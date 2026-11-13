@@ -1,0 +1,11 @@
+$ORIGIN example.
+$TTL 300
+example. 300 IN SOA ns.example. hostmaster.example. 1 3600 600 86400 300
+example. 300 IN NS ns.example.
+ns.example. 300 IN A 192.0.2.1
+child.example. 300 IN NS ns1.child.example.
+child.example. 300 IN NS ns1.child.example.
+child.example. 301 IN NS ns1.child.example.
+child.example. 300 IN NS ns2.child.example.
+signed.example. 300 IN NS ns.signed.example.
+signed.example. 300 IN RRSIG NS 8 2 300 20300101000000 20260101000000 1234 example. AQIDBAUGBwgJCgsMDQ4PEA==
