@@ -2351,11 +2351,7 @@ Bytes generation_descriptor(const fs::path& destination, const fs::path& data_fi
 void check_current(const Options& options, const Image& source) {
     fs::path current_path = options.get("current");
     if (current_path.empty() || !fs::exists(current_path)) return;
-    std::ifstream input(current_path);
-    std::string relative;
-    require(static_cast<bool>(std::getline(input, relative)) && !relative.empty() && relative.size() <= 4096,
-            "invalid CURRENT descriptor");
-    fs::path selected = current_path.parent_path() / relative;
+    fs::path selected = resolve_snapshot_path(current_path);
     require(fs::equivalent(selected, source.snapshot_path()), "CURRENT generation conflict");
 }
 
