@@ -41,3 +41,12 @@ On the one-trial 10,000-page screen, encoder-only time changed from 5.14422 s
 to 4.33856 s, with identical component bytes and SHA256. This is a component
 screen, not whole-build time; it does not estimate variance. Source-derived
 multiset, case, semantics and update regressions passed independently.
+
+An implementation control adds literal-message overloads for `require` and
+`syscheck`. Successful checks no longer construct temporary diagnostic strings;
+all checks and failure exception types/text remain. Dynamic messages retain
+their old overloads. This is implementation overhead removal, not algorithmic
+novelty. `ZIMDB_LAZY_CHECK_TEXT=0` retains the former path for ablation. The
+single isolated 10,000-page screen is retained with source/input before/after
+hashes and probe binary hashes captured after execution. Output and check-failure
+behavior match. Whole-build benefit needs a separate same-protocol cloud case.

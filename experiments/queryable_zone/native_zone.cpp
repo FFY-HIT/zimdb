@@ -147,6 +147,20 @@ void syscheck(bool condition, const std::string& operation) {
     if (!condition) throw std::runtime_error(operation + ": " + std::strerror(errno));
 }
 
+#ifndef ZIMDB_LAZY_CHECK_TEXT
+#define ZIMDB_LAZY_CHECK_TEXT 1
+#endif
+#if ZIMDB_LAZY_CHECK_TEXT
+// Successful literal-message checks do not need a temporary diagnostic object.
+// Dynamic messages retain the overloads above; failure text/type is unchanged.
+void require(bool condition, const char* message) {
+    if (!condition) throw std::runtime_error(message);
+}
+void syscheck(bool condition, const char* operation) {
+    if (!condition) syscheck(false,std::string(operation));
+}
+#endif
+
 double seconds_since(Clock::time_point start) {
     return std::chrono::duration<double>(Clock::now() - start).count();
 }
