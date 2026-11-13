@@ -55,9 +55,9 @@ def native_base(case, round_name='r05_packed_directory', primary_label='native_p
     return Path(row['configuration']['payload']), row['tuple']
 
 
-def rocks_base():
-    summary = json.loads((CAMPAIGN/'rounds/r04_pool_representation/SUMMARY.json').read_text())
-    row = next(row for row in summary['results'] if row['id'] == 'dnsrocks_control_zstd')
+def rocks_base(round_name='r04_pool_representation', label='dnsrocks_control_zstd'):
+    summary = json.loads((CAMPAIGN/'rounds'/round_name/'SUMMARY.json').read_text())
+    row = next(row for row in summary['results'] if row['id'] == label)
     return Path(row['configuration']['payload']), row['tuple']
 
 
@@ -71,6 +71,8 @@ def main():
     parser.add_argument('--native-version', type=Path,
                         help='Frozen directory containing native_zone, native_zone.cpp, Makefile and ledger')
     parser.add_argument('--delta-order', choices=['unordered','owner'], default='unordered')
+    parser.add_argument('--rocks-round')
+    parser.add_argument('--rocks-label', default='dnsrocks_control_zstd')
     args = parser.parse_args()
     root = CAMPAIGN/'rounds'/args.round
     root.mkdir(parents=True, exist_ok=False)
@@ -82,16 +84,24 @@ def main():
     shutil.copy2(frozen_native, root/'bin/native_zone')
     (root/'bin/native_zone').chmod(0o755)
     if any(label.startswith('dnsrocks_') for label in args.cases):
-        shutil.copy2(CAMPAIGN/'rocks_control', root/'bin/rocks_control')
+        rocks_binary = CAMPAIGN/'rounds'/args.rocks_round/'bin/rocks_control' if args.rocks_round else CAMPAIGN/'rocks_control'
+        shutil.copy2(rocks_binary, root/'bin/rocks_control')
+        (root/'bin/rocks_control').chmod(0o755)
     for filename in ['native_zone.cpp','Makefile','ASSUMPTIONS.md']:
         shutil.copy2(frozen_sources/filename, root/'source_snapshot'/filename)
     shutil.copy2(Path(__file__), root/'source_snapshot/measure_updates.py')
+    shutil.copy2(HERE/'ASSUMPTIONS.md', root/'source_snapshot/PROTOCOL_ASSUMPTIONS.md')
     if any(label.startswith('dnsrocks_') for label in args.cases):
-        shutil.copy2(HERE/'rocks_control.go', root/'source_snapshot/rocks_control.go')
+        rocks_sources = CAMPAIGN/'rounds'/args.rocks_round/'source_snapshot' if args.rocks_round else HERE
+        shutil.copy2(rocks_sources/'rocks_control.go', root/'source_snapshot/rocks_control.go')
+        binding_patch = rocks_sources/'CONTROL_BINDING.patch'
+        if binding_patch.exists():
+            shutil.copy2(binding_patch, root/'source_snapshot/CONTROL_BINDING.patch')
     os.sched_setaffinity(0,{4})
     measure = measurement(root)
     plan = {'kind':'PLAN','round':args.round,'problem':'P3', 'cases':args.cases,
             'native_version':str(native_version),'native_base_round':args.native_round,
+            'rocks_base_round':args.rocks_round or 'r04_pool_representation','rocks_base_label':args.rocks_label,
             'delta_order':args.delta_order,
             'previous_generations_retained':1,
             'update': 'Complete NS RRsets, TTL+1, unsigned delegations, all DNSSEC payloads retained',
@@ -126,7 +136,7 @@ def main():
                 prep['source_base'] = str(base)
                 backend = 'zimdb'
             else:
-                base, base_tuple = rocks_base()
+                base, base_tuple = rocks_base(args.rocks_round or 'r04_pool_representation',args.rocks_label)
                 shutil.copytree(base,payload/'live')
                 checkpoint = [str(root/'bin/rocks_control'),'checkpoint','--db',str(payload/'live'),
                               '--out',str(payload/'previous'),'--stats',str(artifact/'checkpoint_stats.json')]

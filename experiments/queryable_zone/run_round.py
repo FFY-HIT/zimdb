@@ -47,18 +47,21 @@ def payload_size(path, backend):
             'included_files': [{'path': str(p), 'bytes': p.stat().st_size} for p in native_files]}
 
 
-def case_spec(root, label, native_binary, control_binary):
+def case_spec(root, label, native_binary, control_binary, legacy_source=OLD_SOURCE):
     artifact = root / 'artifacts' / label
     artifact.mkdir(parents=True, exist_ok=False)
-    if label == 'repo_materialized':
+    if label in ('repo_materialized','legacy_materialized_multiset'):
         output = artifact / 'image.bogi'
         command = ['env', 'BOGI_WORKERS=2', 'BOGI_PARALLEL_SCAN=1', 'BOGI_ZONE_SCAN_REQUIRED=1',
-                   f'BOGI_ZONE_SCAN={OLD_SOURCE}/builder/zone_scan',
-                   f'BOGI_JOIN_SCATTER={OLD_SOURCE}/builder/join_scatter',
+                   f'BOGI_ZONE_SCAN={legacy_source}/builder/zone_scan',
+                   f'BOGI_JOIN_SCATTER={legacy_source}/builder/join_scatter',
                    'BOGI_SORT_CHUNK=800000', 'BOGI_OWNER_SORT_CHUNK=500000', 'BOGI_MERGE_FAN_IN=32',
-                   'python3', '-u', str(OLD_SOURCE/'builder/encode_com_dnssec_zimdb.py'),
+                   'python3', '-u', str(legacy_source/'builder/encode_com_dnssec_zimdb.py'),
                    str(SOURCE), str(output), str(artifact/'work'), 'agency.']
-        return {'id': label, 'backend': 'repo_materialized', 'payload': str(output), 'argv': command}
+        return {'id': label, 'backend': 'repo_materialized', 'payload': str(output), 'argv': command,
+                'legacy_source':str(legacy_source),
+                'legacy_role':'separate multiplicity-fixed control' if label == 'legacy_materialized_multiset'
+                              else 'unmodified historical diagnostic'}
     if label.startswith('dnsrocks_'):
         is_control = label.startswith('dnsrocks_control_')
         codec = label.removeprefix('dnsrocks_control_') if is_control else label.removeprefix('dnsrocks_')
@@ -121,9 +124,13 @@ def main():
     parser.add_argument('--frozen-version', type=Path)
     parser.add_argument('--native-version', type=Path,
                         help='Frozen flat directory containing binary, C++ source, Makefile and ledger')
+    parser.add_argument('--legacy-source', type=Path)
+    parser.add_argument('--legacy-manifest', type=Path)
     args = parser.parse_args()
     if args.native_version and args.frozen_version:
         parser.error('Select one native version directory')
+    if 'legacy_materialized_multiset' in args.cases and not (args.legacy_source and args.legacy_manifest):
+        parser.error('The separate legacy control requires its source and frozen manifest')
     root = CAMPAIGN / 'rounds' / args.round
     root.mkdir(parents=True, exist_ok=False)
     os.sched_setaffinity(0, {4})
@@ -148,6 +155,9 @@ def main():
         for filename in ['native_zone.cpp','Makefile','ASSUMPTIONS.md']:
             shutil.copy2(version_source/filename, snapshot/filename)
     shutil.copy2(Path(__file__),snapshot/'run_round.py')
+    shutil.copy2(HERE/'ASSUMPTIONS.md',snapshot/'PROTOCOL_ASSUMPTIONS.md')
+    if args.legacy_manifest:
+        shutil.copy2(args.legacy_manifest,snapshot/'legacy_control_manifest.json')
     if any(label.startswith('dnsrocks_control_') for label in args.cases):
         shutil.copy2(CAMPAIGN/'rocks_control', control_binary)
         shutil.copy2(HERE/'rocks_control.go', snapshot/'rocks_control.go')
@@ -175,7 +185,7 @@ def main():
     save(root/'PLAN.json', plan)
     results = []
     for label in args.cases:
-        case = case_spec(root, label, native_binary, control_binary)
+        case = case_spec(root, label, native_binary, control_binary,args.legacy_source or OLD_SOURCE)
         result = measure.run_case(case)
         result.update(payload_size(Path(case['payload']), case['backend']))
         result['configuration'] = case
