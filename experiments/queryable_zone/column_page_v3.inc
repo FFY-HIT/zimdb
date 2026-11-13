@@ -12,17 +12,40 @@ Bytes encode_column_page_v3(const std::vector<Record>&records,bool front,uint32_
         if(front)while(common<key.size()&&common<previous.size()&&key[common]==previous[common])++common;
         put_varint(names,common);put_varint(names,key.size()-common);names.insert(names.end(),key.begin()+common,key.end());previous=key;
         std::vector<Record>ns,literal;
+#if ZIMDB_GROUP_NS_CONTEXT
+        std::string relative;bool relative_ready=false;
+#endif
         for(size_t i=first;i<last;++i){
+#if ZIMDB_GROUP_NS_CONTEXT
+            const auto&source=records[i];Record r;
+            r.type=source.type;r.klass=source.klass;r.ttl=source.ttl;r.multiplicity=source.multiplicity;
+#else
             Record r=records[i];
+#endif
             if(r.type==2){
+#if ZIMDB_GROUP_NS_CONTEXT
+                if(!relative_ready){relative=owner_from_key(key,std::string(1,'\0'),flags);relative.pop_back();relative_ready=true;}
+                r.rdata=ns_target_template_relative(relative,source.rdata);
+                verify_ns_template_relative(relative,r.rdata,records[i].rdata);
+#else
                 r.rdata=ns_target_template(key,r.rdata,flags);
                 require(ns_target_expand(key,r.rdata,flags)==records[i].rdata,"NS template roundtrip mismatch");
+#endif
                 ns.push_back(std::move(r));
-            }else literal.push_back(std::move(r));
+            }else{
+#if ZIMDB_GROUP_NS_CONTEXT
+                r.rdata=source.rdata;
+#endif
+                literal.push_back(std::move(r));
+            }
         }
         uint32_t shared=0;bool pooled=!ns.empty()&&pool&&pool->intern_tagged(rr_definition(ns),shared,'S');
         put_varint(refs,pooled?static_cast<uint64_t>(shared)+1:0);
+#if ZIMDB_GROUP_NS_CONTEXT
+        if(!pooled)literal.insert(literal.end(),std::make_move_iterator(ns.begin()),std::make_move_iterator(ns.end()));
+#else
         if(!pooled)literal.insert(literal.end(),ns.begin(),ns.end());
+#endif
         std::sort(literal.begin(),literal.end(),[](const Record&a,const Record&b){
             if(a.type!=b.type)return a.type<b.type;
             if(a.klass!=b.klass)return a.klass<b.klass;

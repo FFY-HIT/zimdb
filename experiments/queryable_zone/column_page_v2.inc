@@ -1,9 +1,10 @@
 // Owner-conditioned exact NS templates. All parameters and dictionaries are
 // stored in the image; neither origin-specific code nor external state is used.
-std::string ns_target_template(const std::string&key,const std::string&target,uint32_t flags){
+#ifndef ZIMDB_GROUP_NS_CONTEXT
+#define ZIMDB_GROUP_NS_CONTEXT 1
+#endif
+std::string ns_target_template_relative(const std::string&relative,const std::string&target){
     std::string literal(1,'L');literal+=target;
-    std::string relative=owner_from_key(key,std::string(1,'\0'),flags);
-    relative.pop_back();
     if(relative.empty())return literal;
     for(size_t p=0;p<target.size()&&static_cast<uint8_t>(target[p]);){
         size_t length=static_cast<uint8_t>(target[p]);
@@ -19,6 +20,25 @@ std::string ns_target_template(const std::string&key,const std::string&target,ui
     return literal;
 }
 
+[[maybe_unused]] std::string ns_target_template(const std::string&key,const std::string&target,uint32_t flags){
+    std::string relative=owner_from_key(key,std::string(1,'\0'),flags);relative.pop_back();
+    return ns_target_template_relative(relative,target);
+}
+void verify_ns_template_relative(const std::string&relative,const std::string&encoded,const std::string&target){
+    require(!encoded.empty(),"empty NS template");
+    if(encoded[0]=='L'){
+        require(encoded.size()==target.size()+1&&std::memcmp(encoded.data()+1,target.data(),target.size())==0,"NS literal mismatch");
+        require(!target.empty()&&target.size()<=255&&wire_name_length(reinterpret_cast<const uint8_t*>(target.data()),target.size())==target.size(),"invalid expanded NS target");
+    }else{
+        require(encoded[0]=='R'&&!relative.empty(),"invalid relative NS template");size_t p=1;
+        auto prefix=get_varint(reinterpret_cast<const uint8_t*>(encoded.data()),encoded.size(),p);
+        require(prefix<=encoded.size()-p,"truncated relative NS template");
+        std::string expanded(encoded.data()+p,prefix);expanded+=relative;
+        expanded.append(encoded.data()+p+prefix,encoded.size()-p-prefix);
+        require(expanded==target,"NS relative mismatch");
+        require(expanded.size()<=255&&wire_name_length(reinterpret_cast<const uint8_t*>(expanded.data()),expanded.size())==expanded.size(),"invalid expanded NS target");
+    }
+}
 std::string ns_target_expand(const std::string&key,const std::string&encoded,uint32_t flags){
     require(!encoded.empty(),"empty NS template");std::string target;
     if(encoded[0]=='L')target=encoded.substr(1);
@@ -51,17 +71,40 @@ Bytes encode_column_page_v2(const std::vector<Record>&records,bool front,uint32_
         if(front)while(common<key.size()&&common<previous.size()&&key[common]==previous[common])++common;
         put_varint(names,common);put_varint(names,key.size()-common);names.insert(names.end(),key.begin()+common,key.end());previous=key;
         std::vector<Record>ns,literal;
+#if ZIMDB_GROUP_NS_CONTEXT
+        std::string relative;bool relative_ready=false;
+#endif
         for(size_t i=first;i<last;++i){
+#if ZIMDB_GROUP_NS_CONTEXT
+            const auto&source=records[i];Record r;
+            r.type=source.type;r.klass=source.klass;r.ttl=source.ttl;r.multiplicity=source.multiplicity;
+#else
             Record r=records[i];
+#endif
             if(r.type==2){
+#if ZIMDB_GROUP_NS_CONTEXT
+                if(!relative_ready){relative=owner_from_key(key,std::string(1,'\0'),flags);relative.pop_back();relative_ready=true;}
+                r.rdata=ns_target_template_relative(relative,source.rdata);
+                verify_ns_template_relative(relative,r.rdata,records[i].rdata);
+#else
                 r.rdata=ns_target_template(key,r.rdata,flags);
                 require(ns_target_expand(key,r.rdata,flags)==records[i].rdata,"NS template roundtrip mismatch");
+#endif
                 ns.push_back(std::move(r));
-            }else literal.push_back(std::move(r));
+            }else{
+#if ZIMDB_GROUP_NS_CONTEXT
+                r.rdata=source.rdata;
+#endif
+                literal.push_back(std::move(r));
+            }
         }
         uint32_t shared=0;bool pooled=!ns.empty()&&pool&&pool->intern_tagged(rr_definition(ns),shared,'S');
         put_varint(refs,pooled?static_cast<uint64_t>(shared)+1:0);
+#if ZIMDB_GROUP_NS_CONTEXT
+        if(!pooled)literal.insert(literal.end(),std::make_move_iterator(ns.begin()),std::make_move_iterator(ns.end()));
+#else
         if(!pooled)literal.insert(literal.end(),ns.begin(),ns.end());
+#endif
         std::sort(literal.begin(),literal.end(),[](const Record&a,const Record&b){
             if(a.type!=b.type)return a.type<b.type;
             if(a.klass!=b.klass)return a.klass<b.klass;

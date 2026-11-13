@@ -16,18 +16,42 @@ struct NsPoolBlock {
 static_assert(sizeof(NsPoolMeta)==64 && sizeof(NsPoolBlock)==40,"NS pool layouts");
 static_assert(sizeof(CowIndexMeta)+sizeof(NsPoolMeta)<=sizeof(ImageHeader::reserved),"pool header fits");
 
+#ifndef ZIMDB_VIEW_INTERN
+#define ZIMDB_VIEW_INTERN 0
+#endif
+#ifndef ZIMDB_POOL_FINGERPRINT_BITS
+#define ZIMDB_POOL_FINGERPRINT_BITS 64
+#endif
+static_assert(ZIMDB_POOL_FINGERPRINT_BITS>=0&&ZIMDB_POOL_FINGERPRINT_BITS<=64,"pool fingerprint bit bound");
+
 class NsPoolBuilder {
 public:
-    explicit NsPoolBuilder(uint32_t limit):limit_(limit) { ids_.reserve(limit); }
+    explicit NsPoolBuilder(uint32_t limit):limit_(limit) {
+#if ZIMDB_VIEW_INTERN
+        view_ids_.reserve(limit);
+#else
+        ids_.reserve(limit);
+#endif
+    }
     bool intern(const Bytes& bytes,uint32_t& id) {
+#if ZIMDB_VIEW_INTERN
+        return intern_span(std::string_view(reinterpret_cast<const char*>(bytes.data()),bytes.size()),id,-1);
+#else
+
         std::string identity(reinterpret_cast<const char*>(bytes.data()),bytes.size());
         auto found=ids_.find(identity);
         if(found!=ids_.end()){id=found->second;return true;}
         if(ids_.size()>=limit_ || bytes.size()>8*1024*1024-raw_)return false;
         id=entries_.size();raw_+=bytes.size();
         ids_.emplace(identity,id);entries_.push_back(std::move(identity));return true;
+    #endif
     }
     bool intern_tagged(const Bytes& bytes,uint32_t& id,char tag) {
+        require(tag=='S'||tag=='T',"invalid pool namespace");
+#if ZIMDB_VIEW_INTERN
+        return intern_span(std::string_view(reinterpret_cast<const char*>(bytes.data()),bytes.size()),id,static_cast<unsigned char>(tag));
+#else
+
         require(tag=='S'||tag=='T',"invalid pool namespace");
         Bytes tagged;tagged.reserve(bytes.size()+1);tagged.push_back(tag);
         tagged.insert(tagged.end(),bytes.begin(),bytes.end());
@@ -38,6 +62,7 @@ public:
         if(tagged_counts_[family]>=limit_/2)return false;
         if(!intern(tagged,id))return false;
         ++tagged_counts_[family];return true;
+    #endif
     }
     NsPoolMeta write(FILE* output)const {
         NsPoolMeta meta{};std::memcpy(meta.magic,"ZIMNSP1\0",8);
@@ -73,7 +98,37 @@ private:
     uint32_t limit_;
     std::array<uint32_t,2>tagged_counts_{};
     uint64_t raw_=0;
+#if ZIMDB_VIEW_INTERN
+    std::unordered_multimap<uint64_t,uint32_t>view_ids_;
+    bool intern_span(std::string_view bytes,uint32_t&id,int tag){
+        uint64_t hash=14695981039346656037ULL;
+        if(tag>=0){uint8_t byte=static_cast<uint8_t>(tag);hash=checksum_continue(hash,&byte,1);}
+        hash=checksum_continue(hash,reinterpret_cast<const uint8_t*>(bytes.data()),bytes.size());
+#if ZIMDB_POOL_FINGERPRINT_BITS < 64
+        hash&=(uint64_t{1}<<ZIMDB_POOL_FINGERPRINT_BITS)-1;
+#endif
+        auto candidates=view_ids_.equal_range(hash);
+        size_t prefix=tag>=0?1:0,required=bytes.size()+prefix;
+        for(auto it=candidates.first;it!=candidates.second;++it){
+            const auto&entry=entries_[it->second];
+            if(entry.size()==required&&(!prefix||static_cast<unsigned char>(entry[0])==tag)&&
+               (!bytes.size()||std::memcmp(entry.data()+prefix,bytes.data(),bytes.size())==0)){
+                id=it->second;return true;
+            }
+        }
+        size_t family=tag=='S'?0:1;
+        if(prefix&&tagged_counts_[family]>=limit_/2)return false;
+        if(entries_.size()>=limit_||required>8*1024*1024-raw_)return false;
+        id=entries_.size();std::string entry;entry.reserve(required);
+        if(prefix)entry.push_back(static_cast<char>(tag));
+        entry.append(bytes.data(),bytes.size());
+        raw_+=required;entries_.push_back(std::move(entry));view_ids_.emplace(hash,id);
+        if(prefix)++tagged_counts_[family];
+        return true;
+    }
+#else
     std::unordered_map<std::string,uint32_t>ids_;
+#endif
     std::vector<std::string>entries_;
 };
 

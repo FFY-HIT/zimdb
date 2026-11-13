@@ -33,6 +33,10 @@
 #include <unordered_map>
 #include <charconv>
 #include <string_view>
+#include <exception>
+#ifdef ZIMDB_USE_SIMDZONE
+#include <zone.h>
+#endif
 
 namespace fs = std::filesystem;
 using Clock = std::chrono::steady_clock;
@@ -603,6 +607,7 @@ void read_zone(const std::string& path, const std::string& origin_text,
 }
 
 #include "flat_zone.inc"
+#include "simd_zone.inc"
 
 void read_hex_lines(const std::string& path, const std::function<void(const std::string&)>& consume) {
     FILE* input = std::fopen(path.c_str(), "rb");
@@ -1946,7 +1951,10 @@ int build_command(const Options& options) {
         std::setvbuf(spool, nullptr, _IOFBF, 65536);
     }
     std::string input_syntax = options.get("input-syntax", "master");
-    require(input_syntax == "master" || input_syntax == "flat", "input-syntax must be master or flat");
+    require(input_syntax == "master" || input_syntax == "flat" || input_syntax == "simd", "input-syntax must be master, flat or simd");
+#ifndef ZIMDB_USE_SIMDZONE
+    require(input_syntax != "simd", "simd input requires a simdzone-enabled build");
+#endif
     require(input_syntax != "flat" || memory_mib >= 16, "flat normalization requires at least 16 MiB workspace");
     std::string sort_tuple = options.get("sort-tuple", "wire");
     require(sort_tuple == "wire" || sort_tuple == "body", "sort-tuple must be wire or body");
@@ -1974,6 +1982,9 @@ int build_command(const Options& options) {
     };
     if (!options.get("zone").empty()) {
         if (input_syntax == "flat") read_flat_zone(options.get("zone"), origin_text, consume);
+#ifdef ZIMDB_USE_SIMDZONE
+        else if (input_syntax == "simd") read_simd_zone(options.get("zone"), origin_text, consume);
+#endif
         else read_zone(options.get("zone"), origin_text, consume);
     }
     else read_hex_lines(options.get("input-wire-hex"), consume);
