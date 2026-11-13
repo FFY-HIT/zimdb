@@ -2362,6 +2362,9 @@ int update_command(const Options& options) {
     auto io_before = process_io();
     auto total_start = Clock::now();
     fs::path out = fs::absolute(options.need("out")).lexically_normal();
+    std::string current_destination = options.get("current");
+    require(current_destination.empty() || fs::absolute(current_destination).lexically_normal() != out,
+            "generation output and CURRENT must be distinct paths");
     fs::path work = options.need("work");
     require(!fs::exists(out), "generation output already exists");
     require(!fs::exists(work) || fs::is_empty(work), "update work directory must be fresh");

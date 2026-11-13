@@ -71,6 +71,14 @@ def main():
         assert immutable.read_bytes() == immutable_before
         assert base.stat().st_size == data_size_before
         assert not (root/(label+'_invalid.zg')).exists()
+    same_path = root/'same_output_and_current.zg'
+    current_before = outer.read_bytes()
+    before_same = base.stat().st_size
+    same = run(args.binary,'update','--image',outer,'--delta',delta,
+               '--out',same_path,'--current',same_path,'--work',root/'same_work','--memory-mib','16')
+    assert same.returncode != 0 and b'must be distinct paths' in same.stderr
+    assert not same_path.exists() and not (root/'same_work').exists()
+    assert base.stat().st_size == before_same and outer.read_bytes() == current_before
     receipt = {'status':'PASS','qualification_only':True,
                'old_binary_sha256':sha(args.old_binary.read_bytes()),
                'binary_sha256':sha(args.binary.read_bytes()),
@@ -79,6 +87,7 @@ def main():
                'stale_snapshot_rejected_before_append':True,
                'binary_image_current_rejected_before_append':True,
                'binary_generation_current_rejected_before_append':True,
+               'equal_generation_and_current_rejected_before_append':True,
                'retained_old_prefix_identical':True,'wire_occurrences':before.stdout.count(b'\n'),
                'wire_export_identical':True,'wire_export_sha256':sha(before.stdout),
                'old_failure':old.stderr.decode(),'stale_failure':stale.stderr.decode()}
