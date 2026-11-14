@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/facebook/dns",
+  "upstream_commit": "943c50fe80340760c44aeeb0d3460e527cbc5339",
+  "module": "dnsrocks",
+  "snapshot": "qualified authority control module with master-file import, updated Go dependencies and optional typed/ENT hooks",
+  "zimdb_core_snapshot": "218e9cd",
+  "measured_serving_revision": "fast6",
+  "measured_reader_sha256": "1f06119cf0447b93f9ff7265b55de8bff4f2cae55783bea08075c9dfa6900c05",
+  "publication_changes": [
+    "relative core include path",
+    "shared reader include shim"
+  ]
+}

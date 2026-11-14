@@ -1,5 +1,15 @@
 # Build Note
 
+Full-COM construction and latest authority-query results are now recorded in
+[the 2026-11-14 report](../../docs/experiments/com-20260919-20261114.md).
+The agency rounds and historical pending statements below describe their original
+measurement checkpoints; they do not supersede that report.
+
+Full-COM construction and latest authority-query results are now recorded in
+[the 2026-11-14 report](../../docs/experiments/com-20260919-20261114.md).
+The agency rounds and historical pending statements below describe their original
+measurement checkpoints; they do not supersede that report.
+
 | Rung | Implementation | Acceptance | Status |
 |---|---|---|---|
 | F0 | Native source-to-image and tree-free lookup spine | validate.py --run-fixture with the archived binary | implemented, checks passed |

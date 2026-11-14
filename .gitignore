@@ -15,3 +15,8 @@ ops/data/
 *.zimdb.tmp
 _vendor_ops.py
 
+
+/build/
+*.zim
+*.zst
+*.raw.jsonl

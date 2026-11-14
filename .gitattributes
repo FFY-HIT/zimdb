@@ -1,0 +1,2 @@
+# Preserve the exact measured reader bytes, including its original CRLF.
+experiments/queryable_zone/serving_reader.inc -text whitespace=cr-at-eol

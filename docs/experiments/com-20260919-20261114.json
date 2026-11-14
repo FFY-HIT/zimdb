@@ -1,0 +1,182 @@
+{
+  "status": "COMPLETE_SINGLE_TRIAL_BUILD_AND_FINAL_QUERY_SUMMARY",
+  "dataset": {
+    "name": "COM 2026-09-19",
+    "source_bytes": 27012952680,
+    "source_sha256": "c2332fe05a7c6904f72c67c283521535fdadd2e7234d174d0de6c55e3b39a564",
+    "rr_occurrences": 441290102,
+    "unique_rrs": 441290101,
+    "duplicate": "one closing SOA occurrence"
+  },
+  "measured_code": {
+    "native_core_commit": "218e9cd",
+    "serving_revision": "fast6",
+    "native_zone_cpp_sha256": "e421ab543e7b72dadba109647cdc7586b0e4635f2992c5e8f8642154e8ded4a0",
+    "serving_reader_sha256": "1f06119cf0447b93f9ff7265b55de8bff4f2cae55783bea08075c9dfa6900c05",
+    "measured_server_binary_sha256": "002667ab3b5a72eadd8f2fcd58ecf91f5a450ce0675e354498b1e96d276f2306",
+    "publication_changes": "relative native-core include and canonical serving-reader include shim; algorithm bodies unchanged"
+  },
+  "metric_scopes": {
+    "native_bytes": "logical native representation bytes, no external recompression",
+    "T_build_seconds": "verified pre-read decompressed zone -> native conversion/build/close + common fsync; verification, source preread and decompression outside",
+    "build_peak_RSS_bytes": "10ms sampled simultaneous build-tool process-tree RSS; not total physical memory or cgroup memory",
+    "mean_RTT_us": "arithmetic mean of all 100000 measured requests, client send -> complete response, one outstanding request",
+    "query_peak_RSS_bytes": "10ms sampled server process-tree RSS in actual first-send to last-response window",
+    "SOA_ready_seconds": "fresh daemon start -> first correct SOA response; separate from build",
+    "W_delta": "not measured in this full-COM four-way round"
+  },
+  "protocol": {
+    "trials_per_system": 1,
+    "measured_queries_per_system": 100000,
+    "disjoint_warmup_per_system": 10000,
+    "RD": 0,
+    "DO": 0,
+    "EDNS_bytes": 1232,
+    "class_counts": {
+      "delegation_A": 20000,
+      "below_cut_A": 20000,
+      "signed_DS": 20000,
+      "unsigned_DS": 20000,
+      "absent_A": 20000
+    },
+    "server_cpu_affinity": "2,4",
+    "query_client_cpu_affinity": "6",
+    "observer_cpu_affinity": "0",
+    "response_caches": "disabled",
+    "effective_workers": 1,
+    "cache_policy": "full native-file preread before fresh daemon, then fixed disjoint warmup; not equal physical cache residency",
+    "cgroup_memory_cap_bytes": 124554051584,
+    "swap": 0,
+    "query_workload_sha256": "a4f6b701db8664ab529a249ab7e1b7401a3c851639ca104fc4cb7170cdebdfb6",
+    "warmup_workload_sha256": "7416c009b1d88437a5cdf9fbd63d9f05c844a6e55ada875d58b0aeaffdf65eda"
+  },
+  "results": [
+    {
+      "case": "zimdb",
+      "system": "ZimDB",
+      "native_bytes": 3344985486,
+      "native_GiB": 3.1152604948729277,
+      "T_build_seconds": 381.08940228100255,
+      "build_peak_RSS_bytes": 32636928,
+      "build_peak_RSS_MiB": 31.125,
+      "build_cgroup_peak_bytes_including_file_cache": 23218712576,
+      "mean_RTT_us": 72.06264333,
+      "query_peak_RSS_bytes": 94220288,
+      "query_peak_RSS_MiB": 89.85546875,
+      "SOA_ready_seconds": 0.6382023009937257,
+      "queries": 100000,
+      "errors": 0,
+      "build_summary_sha256": "83c4c5972ab6aeacd0bb0b529d908d27c143dd12640823f06dad8ac7e1fdb1e9",
+      "query_summary_sha256": "9e1e3301213c8933a1f3361a62192319910530ec882351bffc5f7521cdb26efa",
+      "raw_measured_sha256": "d5bcffc77220df2bcc07c2204718df39815c4d1eaed75ef585f6e6df9cadb222",
+      "RSS_raw_sha256": "92cb2d7e8d75389f6c3ced624b4720e6f607da1eee00c5df5a6c612d3a5d9ec4"
+    },
+    {
+      "case": "dnsrocks",
+      "system": "DNSRocks + RocksDB",
+      "native_bytes": 9203875291,
+      "native_GiB": 8.571776832453907,
+      "T_build_seconds": 2492.7514383649977,
+      "build_peak_RSS_bytes": 102157672448,
+      "build_peak_RSS_MiB": 97425.1484375,
+      "build_cgroup_peak_bytes_including_file_cache": 123836911616,
+      "mean_RTT_us": 49.06556836,
+      "query_peak_RSS_bytes": 223879168,
+      "query_peak_RSS_MiB": 213.5078125,
+      "SOA_ready_seconds": 0.274363276999793,
+      "queries": 100000,
+      "errors": 0,
+      "build_summary_sha256": "5f9d1ee403c6d892c69b11c25282e81938eb58acad0402d7797991449543e1d7",
+      "query_summary_sha256": "3f076eb76dca23f219ba3bdbfaa7ff4330d756de4481c95d91f37d48d3d0b313",
+      "raw_measured_sha256": "675b6bbd489f2571759208f767b953005e38ab1544f0de6a7dd3a0b9b1109028",
+      "RSS_raw_sha256": "b6a070267c4179b13d562d2acda9c020c25a453d5664df0121f8f522e9b8d7a1"
+    },
+    {
+      "case": "pdns",
+      "system": "PowerDNS + LMDB",
+      "native_bytes": 45415313408,
+      "native_GiB": 42.29630661010742,
+      "T_build_seconds": 5737.803789265992,
+      "build_peak_RSS_bytes": 120564936704,
+      "build_peak_RSS_MiB": 114979.68359375,
+      "build_cgroup_peak_bytes_including_file_cache": 124554051584,
+      "mean_RTT_us": 43.425026530000004,
+      "query_peak_RSS_bytes": 7015317504,
+      "query_peak_RSS_MiB": 6690.328125,
+      "SOA_ready_seconds": 0.08876195600896608,
+      "queries": 100000,
+      "errors": 0,
+      "build_summary_sha256": "14ef4cca59c32281a33bd4ba345d5cf18a9d9eacefeffe077ad6513976830de9",
+      "query_summary_sha256": "7ecb3b12b18e63a06e6780a8d11a892f30a91892356f31b6469ab6ab5f8fb163",
+      "raw_measured_sha256": "93ce0aef38ac11e0cca4cc31cba0e4ea2f627d20d3d443102973cbd2873e0b99",
+      "RSS_raw_sha256": "61af1e99a48d9e351443664d61c64f60747698b484e4cea7e60fec2abec3d133"
+    },
+    {
+      "case": "bind",
+      "system": "BIND + raw",
+      "native_bytes": 20149567090,
+      "native_GiB": 18.765746699646115,
+      "T_build_seconds": 898.657303715001,
+      "build_peak_RSS_bytes": 78807916544,
+      "build_peak_RSS_MiB": 75157.0859375,
+      "build_cgroup_peak_bytes_including_file_cache": 96073035776,
+      "mean_RTT_us": 20.40541867,
+      "query_peak_RSS_bytes": 78376726528,
+      "query_peak_RSS_MiB": 74745.87109375,
+      "SOA_ready_seconds": 1130.3669357799954,
+      "queries": 100000,
+      "errors": 0,
+      "build_summary_sha256": "209dabbd74a75a46852e8b9fcf4fa3675813015393720a04284fdcea9151b8b9",
+      "query_summary_sha256": "d5ef2d4d0afce3bb58e4980fe7c0de387c255833d02be07b6cae920c00d052ec",
+      "raw_measured_sha256": "d04593f4b48669761609b1b5af4f622dcab5248bfad164a24cf459fa7447e9f4",
+      "RSS_raw_sha256": "d7c8dc7a6cc9ceaa8398aa1b184104b3ceb9c1a9b1a962a0024dc685ff7f3483"
+    }
+  ],
+  "evidence_paths_relative_to_D_archive": [
+    {
+      "case": "zimdb",
+      "build": "raw/original_four_systems/builds/zimdb/SUMMARY.json",
+      "query": "raw/query_campaigns/queries_final_20261114_0620/zimdb/SUMMARY.json"
+    },
+    {
+      "case": "dnsrocks",
+      "build": "raw/original_four_systems/builds/dnsrocks/SUMMARY.json",
+      "query": "raw/query_campaigns/queries_final_20261114_0620/dnsrocks/SUMMARY.json"
+    },
+    {
+      "case": "pdns",
+      "build": "raw/original_four_systems/builds/pdns/SUMMARY.json",
+      "query": "raw/query_campaigns/queries_final_20261114_0620/pdns/SUMMARY.json"
+    },
+    {
+      "case": "bind",
+      "build": "raw/original_four_systems/builds/bind/SUMMARY.json",
+      "query": "raw/query_campaigns/queries_final_20261114_0620/bind/SUMMARY.json"
+    }
+  ],
+  "limits": [
+    "One fixed balanced DO=0 workload and one trial; no Internet traffic mean or loaded throughput claim.",
+    "Build and query were separate campaigns; final query fast6 does not change the measured native image.",
+    "DNSRocks uses a declared qualified control fork, native default Snappy/block target, not forced Zstd 64KiB plus extra compaction.",
+    "PowerDNS official presigned AXFR representation synthesizes NSEC3/NSEC3PARAM and indexes; generation/insert costs are included and separately attributed.",
+    "ZimDB full-COM content acceptance is whole-file identity to independently source-qualified R06, not a fresh 441M-record traversal.",
+    "Known native RocksDB synthetic ENT/wildcard capability failures are retained; the COM five-class workload passes.",
+    "Publication-only adapter smoke: 8/9 passed; nested delegation uses the deeper cut, while the native core correctly reports the outer cut. This integration edge remains unresolved and is not in the COM workload.",
+    "Sampled process RSS excludes much shared file cache; it cannot establish an equivalent total physical-memory ratio.",
+    "P1 fivefold native-size target remains unmet; P3 four-way full-COM update costs were not measured."
+  ],
+  "comparisons_to_dnsrocks": {
+    "native_size_baseline_over_zimdb": 2.7515441635013422,
+    "build_time_baseline_over_zimdb": 6.541119809274901,
+    "sampled_build_RSS_baseline_over_zimdb": 3130.1252510040163,
+    "query_mean_zimdb_over_baseline": 1.4687008780020172,
+    "sampled_query_RSS_baseline_over_zimdb": 2.376124853280007,
+    "P1_5x_gate_met": false
+  },
+  "powerdns_stage_attribution_seconds": {
+    "receive_classify_materialize": 1636.4898,
+    "interleaved_nsec3_ENT_index_and_LMDB_insert_commit": 4093.9482,
+    "note": "second stage is not isolated NSEC3 hash generation; ordinary source projection has 433056771 records"
+  },
+  "generated_utc": "2026-11-14T07:23:24.950975+00:00"
+}

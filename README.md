@@ -1,12 +1,35 @@
 # ZimDB
 
-ZimDB (BOGI-v2.3) — zone image builder, authoritative-server adapters, and ops edit client.
+ZimDB 将 DNS 区域文件构造成支持名称状态、ENT、closest encloser、通配来源、zone cut 和 RRset 查询的紧凑映像。
 
-This repository contains the code needed to:
+当前原生路径采用 ZIMDNS1 格式，提供有界工作空间构造、上下文 NS 模板、分块共享池、NSEC3 局部引用和世代更新。DNSRocks 集成提供该格式的权威查询服务。
 
-1. **Build** a ZimDB image from a DNS zone file (the production encoder that builds full `.com`+DNSSEC in ~390 s on a 16-core / 123 GiB host).
-2. **Serve** that image from NSD / Knot / Unbound / YADIFA / CoreDNS / BIND via thin product adapters + shared `libbogi23`.
-3. **Edit** resource records in a desktop GUI and **Apply** changes into a binary zone image (ops path).
+## 构建与查询
+
+Linux / WSL 需要 C++17、ldns、LZ4、Zstandard 和 OpenSSL 开发库。
+
+```sh
+make -C experiments/queryable_zone
+experiments/queryable_zone/native_zone build \
+  --zone /path/to/example.zone --origin example. \
+  --out /path/to/example.zim --work /path/to/work \
+  --memory-mib 64 --run-memory-mib 4 --sort-engine hierarchy \
+  --sort-tuple body --codec zstd --pool none --front-code 1 \
+  --index cow --key-codec compact --page-layout columnar \
+  --ns-pool-entries 65536 --ns-templates 1 --nsec3-links 1
+```
+
+完整COM实测使用固定版本 SIMD parser，构建方式见 [原生构建说明](experiments/queryable_zone/BUILD_NOTE.md)。
+
+[DNSRocks 接入说明](adapters/dnsrocks/README.zimdb.md) 给出 Go 权威程序的构建和运行入口。
+
+## 完整COM实验
+
+2026-09-19快照包含441,290,102条输入RR出现。ZimDB原生映像3,344,985,486字节，构建381.089秒，构建进程树采样峰值RSS31.125MiB。相同10万条计时查询下，平均RTT72.063微秒，查询峰值RSS89.9MiB。
+
+完整配置、四组对比、测量口径与现有边界见 [实验汇总](docs/experiments/com-20260919-20261114.md)。这些数据来自一次固定负载测量。查询读取器优化按工程实现报告。
+
+仓库同时保留 BOGIP1 构造器、libbogi23、运维客户端及对应适配器。下方为该工具链的使用说明。
 
 ## Ops 编辑客户端（桌面 GUI）
 
@@ -31,7 +54,7 @@ PYTHONPATH=. python3 -m ops_client
 - 接口说明：[`ops/README.md`](ops/README.md)
 - **当前 Apply 后端**：container 分片映像（可演示）。生产 DNSSEC `.bogi` Apply **尚未接通**，API 已预留 `ApplyBackend` 插槽。
 
-## Quick start — build an image
+## BOGIP1 builder
 
 Linux / WSL, Python 3.10+, `gcc`.
 

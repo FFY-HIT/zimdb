@@ -1,0 +1,13 @@
+{
+  "optional_simd_parser": {
+    "repository": "https://github.com/NLnetLabs/simdzone.git",
+    "commit": "c593a299b6d37450f0640fafdf336825e42ffc61",
+    "scope": "pinned parser used by the qualified COM construction source",
+    "build": "Build its static build/libzone.a; pass SIMDZONE_DIR to the native Makefile. The generic ldns parser build does not require this dependency."
+  },
+  "serving": {
+    "Go": "1.26.x",
+    "RocksDB": "9.11.2",
+    "qualified_control": "../../adapters/dnsrocks/UPSTREAM.json"
+  }
+}
